@@ -15,7 +15,8 @@
 #include <stdexcept>
 
 //---Degrees in the file are converted to radians for use in the program.------
-static const float kDegreesToRadians = float( M_PI ) / 180.0f;
+static const float kPi = 3.14159265358979323846f;
+static const float kDegreesToRadians = kPi / 180.0f;
 
 
 //-----------------------------------------------------------------------------

@@ -19,5 +19,6 @@ float CRangeSensor::Sense( const CPose& arRobotPose, const CRoom& arRoom ) const
 {
     float WorldAngle = arRobotPose.mHeading + mMountAngle;
 
-    return arRoom.RangeToWall( arRobotPose.mPosition, WorldAngle, mMaxRange );
+    // RangeToWall was renamed RangeAlongRay when it moved to CLoopShape.
+    return arRoom.RangeAlongRay( arRobotPose.mPosition, WorldAngle, mMaxRange );
 }
