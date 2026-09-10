@@ -46,15 +46,18 @@ class CLineFollowerRobot : public CRobot
         //---Sensor mounting and steering tuning (tuned against SimpleLine.map)---
         const float mSensorForwardOffset;   // both sensors sit this far ahead of centre
         const float mSensorLateralOffset;   // the "beside" sensor's offset to the right
-        const float mSteerDelta;            // wheel-speed swing applied when correcting
+        const float mTurnSpeed;             // forward speed while correcting; below base speed so a
+                                            //   corner becomes a near-pivot and the line is never lost
+        const float mSteerDelta;            // wheel-speed swing for a normal correction
+        const float mHardSteerDelta;        // larger swing when the line has slipped to the outer sensor
 
         //---Sensors: one over the line, one beside it to the right---
-        CLineSensor mOnLineSensor;
-        CLineSensor mOffLineSensor;
+        CLineSensor mInnerSensor;
+        CLineSensor mOuterSensor;
 
         //---Most recent readings, refreshed by Sense()---
-        bool mOnLine;
-        bool mOffLine;
+        bool mInnerOnLine;
+        bool mOuterOnLine;
 
         //---The line this robot follows; not owned---
         const CFloorLine& mrLine;
