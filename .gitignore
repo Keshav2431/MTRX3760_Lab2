@@ -1,0 +1,6 @@
+# Build artifacts - the assignment is submitted as source only, no binaries.
+WallFollower
+WallFollower.exe
+*.exe
+*.o
+*.obj

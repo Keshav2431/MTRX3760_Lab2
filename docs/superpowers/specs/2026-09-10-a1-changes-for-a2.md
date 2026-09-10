@@ -9,7 +9,8 @@ post-mortem questions:
 - *"What's an important aspect of the design of A1 that turned out well when
   building A2?"*
 
-A1 baseline is pinned at git tag **`a1-baseline`** (commit `d3bae7e`).
+A1 baseline is pinned at git tag **`a1-baseline`** (commit `d3bae7e`). The
+frozen A1 program now also lives in **`A1/`**; active A2 work is in **`A2/`**.
 Update this file as implementation proceeds — mark each row Done when the
 change lands.
 

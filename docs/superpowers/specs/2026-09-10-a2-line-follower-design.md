@@ -292,13 +292,18 @@ g++ -Wall -Wextra -std=c++17 \
 (Windows/MSYS2 adds `-I/c/msys64/ucrt64/include -L/c/msys64/ucrt64/lib
 -lopengl32 -lgdi32 -lwinmm`, as in the README.)
 
-## Repository layout — needs your confirmation
+## Repository layout — decided
 
-The assignment wants full code for **both** A1 and A2 in the report appendix
-and the zip. Proposed: freeze the current flat tree into `A1/` and do all A2
-work in `A2/`, with the vendored raylib shared at the repo root and referenced
-with `-I../ -L../`. Alternative: keep A2 at the repo root and rely on git
-history / a tag for the A1 snapshot. Decide before implementation starts.
+Two self-contained folders:
+
+- `A1/` — the wall follower frozen as submitted for A1 (extracted from git tag
+  `a1-baseline`, plus the `M_PI` → `kPi` portability fix so it builds under the
+  standard `-std=c++17` command).
+- `A2/` — the refactored two-robot program (all files above).
+
+Vendored raylib stays at the repo root as shared reference; the build commands
+do not reference it (they assume an installed raylib, as the assignment does),
+so no `-I../` is needed. `docs/` and this spec stay at the root.
 
 ## Out of scope
 

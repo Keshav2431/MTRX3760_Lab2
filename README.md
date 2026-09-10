@@ -6,8 +6,16 @@ object‑oriented design and modern C++ style, built with concepts from Weeks 1�
 only. All rendering is done with the [raylib](https://www.raylib.com/) library,
 accessed **only** through a `CRender` wrapper class.
 
-This repository currently contains the **Part A1 (Wall Follower)** implementation
-plus the unmodified starter code. See [Status](#status) below.
+The code is split into two self-contained programs:
+
+- **`A1/`** — the Wall Follower on its own, frozen as submitted for A1.
+- **`A2/`** — the Wall Follower **and** the Line Follower in one program, after
+  the A1 classes were refactored into shared base classes. This is the active
+  codebase.
+
+Each folder builds independently (see [Building and running](#building-and-running)).
+The vendored raylib files at the repo root are shared reference only. See
+[Status](#status) below.
 
 ---
 
@@ -44,7 +52,29 @@ consts, enums, data and functions live inside classes).
 
 ## Repository layout
 
-### Source written for the lab (A1)
+```
+A1/                 wall follower only, frozen as submitted for A1
+A2/                 wall + line follower in one program (active)
+docs/superpowers/   design spec and the A1→A2 change log
+raylib.h, ...       vendored raylib, shared reference (not submitted)
+```
+
+### A2 — files added or changed on top of A1
+
+| File | Responsibility |
+|------|----------------|
+| `CSimulation.h/.cpp` | Owns the room, the floor line and both robots; runs the fixed‑step loop over them; prints a per‑robot summary. `main.cpp` just builds one and calls `Run()`. |
+| `CLoopShape.h/.cpp` | **New base class.** A closed loop of segments loaded from a `.map`; all the ray/point geometry that used to live in `CRoom`. `RangeAlongRay`, `DistanceToNearestSegment`. |
+| `CRobot.h/.cpp` | **New base class.** The common half of every robot: pose, drive train, trail, counts, the `Update()` template method, `Draw()`. Subclasses fill in `Sense()` and `SteerFromSensors()`. |
+| `CFloorLine.h/.cpp` | `CLoopShape` subclass. `IsLineUnder(point)` — true within half the 5‑unit line width of a segment. |
+| `CLineSensor.h/.cpp` | A point sensor mounted at a fixed `(forward, lateral)` offset in the robot frame. `Sense(pose, line)` → `bool`. |
+| `CLineFollowerRobot.h/.cpp` | `CRobot` subclass. Two `CLineSensor`s (one over the line, one beside it); a bang‑bang steering law. |
+| `CRoom.h/.cpp` | Now a `CLoopShape` subclass — just `IsColliding` and wall drawing. |
+| `CWallFollowerRobot.h/.cpp` | Now a `CRobot` subclass — just the two range sensors and the two‑mode steering law. |
+| `CRangeSensor.cpp` | One call renamed (`RangeToWall` → inherited `RangeAlongRay`). |
+| `CLoopReader.cpp` | `M_PI` → a named `kPi` constant (portability under strict `-std=c++17`). |
+
+### A1 — source written for the lab
 
 | File | Responsibility |
 |------|----------------|
@@ -65,9 +95,10 @@ consts, enums, data and functions live inside classes).
 
 ### Vendored raylib (do **not** submit these)
 
-`raylib.h`, `raymath.h`, `rlgl.h`, `raylib.pc`, `raylib-config*.cmake`,
-`libraylib.a`. The `.a` here is a **Linux/ELF** build — see the Windows notes
-below.
+At the repo root, shared by both folders: `raylib.h`, `raymath.h`, `rlgl.h`,
+`raylib.pc`, `raylib-config*.cmake`, `libraylib.a`. The `.a` here is a
+**Linux/ELF** build — see the Windows notes below. The build commands do not
+reference these; they rely on an installed raylib, as the assignment assumes.
 
 ---
 
@@ -128,23 +159,35 @@ load.
 
 ## Building and running
 
+`cd` into `A1/` or `A2/` first — each folder is a complete program.
+
 ### Linux (the "standard compile command" the unit assumes)
 
 Install raylib (`sudo apt install libraylib5-dev`, or build 5.5 from source into
 `$HOME/raylib` on a lab machine — see the comment block in `CRender.h`). Then:
 
 ```bash
+# A2 (wall + line follower)
+cd A2
+g++ -Wall -Wextra -std=c++17 \
+    main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp \
+    CRangeSensor.cpp CLineSensor.cpp CDriveTrain.cpp CRobot.cpp \
+    CWallFollowerRobot.cpp CLineFollowerRobot.cpp CLoopReader.cpp CRender.cpp \
+    -lraylib -o WallFollower
+
+./WallFollower                                   # SimpleWalls.map + SimpleLine.map
+./WallFollower SimpleWalls.map SimpleLine.map
+
+# A1 (wall follower only)
+cd A1
 g++ -Wall -Wextra -std=c++17 \
     main.cpp CRoom.cpp CRangeSensor.cpp CDriveTrain.cpp \
     CWallFollowerRobot.cpp CLoopReader.cpp CRender.cpp \
     -lraylib -o WallFollower
-
-./WallFollower                 # defaults to SimpleWalls.map
-./WallFollower SimpleWalls.map
 ```
 
-Close the window to end the run; the summary (updates completed, total collisions)
-prints to the console.
+Close the window to end the run; the per‑robot summary (updates completed, total
+collisions) prints to the console.
 
 ### Windows (MSYS2 / UCRT64) — what applies on this machine
 
@@ -155,14 +198,10 @@ native raylib package and link the Windows system libraries:
 # once, from an MSYS2 shell (or: C:\msys64\usr\bin\pacman ...)
 pacman -S --needed mingw-w64-ucrt-x86_64-raylib
 
-# from the repo, using the UCRT64 g++ (C:\msys64\ucrt64\bin\g++)
-g++ -Wall -Wextra -std=c++17 \
-    main.cpp CRoom.cpp CRangeSensor.cpp CDriveTrain.cpp \
-    CWallFollowerRobot.cpp CLoopReader.cpp CRender.cpp \
-    -I/c/msys64/ucrt64/include -L/c/msys64/ucrt64/lib \
-    -lraylib -lopengl32 -lgdi32 -lwinmm -o WallFollower.exe
-
-./WallFollower.exe
+# then, per folder, using the UCRT64 g++ (C:\msys64\ucrt64\bin\g++), add:
+#   -I/c/msys64/ucrt64/include -L/c/msys64/ucrt64/lib
+#   -lopengl32 -lgdi32 -lwinmm
+# to the matching command above, and use -o WallFollower.exe
 ```
 
 > A GUI window needs a desktop session — it won't display over a plain SSH/agent
@@ -172,11 +211,14 @@ g++ -Wall -Wextra -std=c++17 \
 
 ## Status
 
-- [x] **A1 — Wall Follower**: implemented (this repo).
-- [ ] **A2 — Line Follower**: not started. Needs a line sensor, a line‑follower
-      robot, both robots running in one program, and a shared abstraction (the A3
-      questions expect the A1 design to have been refactored for A2).
-- [ ] **A0 / A3** report sections.
+- [x] **A1 — Wall Follower**: implemented, frozen in `A1/`.
+- [~] **A2 — Line Follower**: refactor done (`CRobot` / `CLoopShape` base
+      classes, `CSimulation`, line sensor and line‑follower robot). Both
+      programs build clean with `-Wall -Wextra -std=c++17`. Remaining: the
+      line‑following control law (`CLineFollowerRobot::SteerFromSensors` is a
+      stub that drives straight), tuning, and a runtime check.
+- [ ] **A0 / A3** report sections. See `docs/superpowers/specs/` for the design
+      spec and the A1→A2 change log (A3 material).
 - [ ] **A4 — ROS 2** tutorials + `House` plugin.
 - [ ] **A5 — Noise** bonus.
 
