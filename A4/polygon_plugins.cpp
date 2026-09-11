@@ -68,5 +68,3 @@ namespace polygon_plugins
 PLUGINLIB_EXPORT_CLASS(polygon_plugins::Square, polygon_base::RegularPolygon)
 PLUGINLIB_EXPORT_CLASS(polygon_plugins::Triangle, polygon_base::RegularPolygon)
 PLUGINLIB_EXPORT_CLASS(polygon_plugins::House, polygon_base::RegularPolygon)
-polygon_plugins.cpp
-Displaying Screenshot from 2026-09-11 14-30-59.png.
