@@ -1,0 +1,72 @@
+#include <polygon_base/regular_polygon.hpp>
+#include <cmath>
+
+namespace polygon_plugins
+{
+  class Square : public polygon_base::RegularPolygon
+  {
+    public:
+      void initialize(double side_length) override
+      {
+        side_length_ = side_length;
+      }
+
+      double area() override
+      {
+        return side_length_ * side_length_;
+      }
+
+    protected:
+      double side_length_;
+  };
+
+  class Triangle : public polygon_base::RegularPolygon
+  {
+    public:
+      void initialize(double side_length) override
+      {
+        side_length_ = side_length;
+      }
+
+      double area() override
+      {
+        return 0.5 * side_length_ * getHeight();
+      }
+
+      double getHeight()
+      {
+        return sqrt((side_length_ * side_length_) -
+                    ((side_length_ / 2) * (side_length_ / 2)));
+      }
+
+    protected:
+      double side_length_;
+  };
+
+  class House : public polygon_base::RegularPolygon
+  {
+    public:
+      void initialize(double side_length) override
+      {
+        square_.initialize(side_length);
+        triangle_.initialize(side_length);
+      }
+
+      double area() override
+      {
+        return square_.area() + triangle_.area();
+      }
+
+    private:
+      Square square_;
+      Triangle triangle_;
+  };
+}
+
+#include <pluginlib/class_list_macros.hpp>
+
+PLUGINLIB_EXPORT_CLASS(polygon_plugins::Square, polygon_base::RegularPolygon)
+PLUGINLIB_EXPORT_CLASS(polygon_plugins::Triangle, polygon_base::RegularPolygon)
+PLUGINLIB_EXPORT_CLASS(polygon_plugins::House, polygon_base::RegularPolygon)
+polygon_plugins.cpp
+Displaying Screenshot from 2026-09-11 14-30-59.png.
