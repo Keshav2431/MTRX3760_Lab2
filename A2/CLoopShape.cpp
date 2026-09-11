@@ -1,11 +1,11 @@
 //-----------------------------------------------------------------------------
 // CLoopShape.cpp
 //
-// Implements CLoopShape. LoadFromFile turns the loop's vertices into a closed
-// chain of CSegments (last vertex joins back to the first). DistanceToNearest-
-// Segment and RangeAlongRay are both "test every segment, keep the best
-// result" loops over two small geometry helpers. All of this was CRoom in A1;
-// it moved here so CFloorLine can reuse it.
+// LoadFromFile turns the vertices from the file into a closed chain of
+// segments. DistanceToNearestSegment and RangeAlongRay both check every
+// segment in turn and keep the best answer, using the two small geometry
+// helpers at the bottom of the file to do the actual maths. All of this used
+// to be part of CRoom in A1; it moved here so CFloorLine could use it too.
 //-----------------------------------------------------------------------------
 
 #include "CLoopShape.h"
@@ -15,33 +15,56 @@
 #include <iostream>
 
 //-----------------------------------------------------------------------------
+// There is nothing to set up yet: the file reader and the segment list start
+// out empty, and LoadFromFile fills them in later. Written here rather than
+// in the header, as usual.
+//-----------------------------------------------------------------------------
+CLoopShape::CLoopShape()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+CLoopShape::~CLoopShape()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Reads the file, checks it actually described a shape, and if so turns its
+// vertices into segments. Fails and leaves the old shape (if any) alone
+// otherwise.
 bool CLoopShape::LoadFromFile( const std::string& arFilename )
 {
     bool Success = mLoopReader.ReadFile( arFilename );
 
+    if( Success && mLoopReader.GetVertices().empty() )
+    {
+        std::cout << "CLoopShape: '" << arFilename << "' contains no vertices" << std::endl;
+        Success = false;
+    }
+
     if( Success )
     {
-        mSegments.clear();
-
-        const std::vector<Vec2D>& Vertices = mLoopReader.GetVertices();
-        if( Vertices.empty() )
-        {
-            std::cout << "CLoopShape: '" << arFilename << "' contains no vertices" << std::endl;
-            Success = false;
-        }
-        else
-        {
-            // Close the loop: the last vertex joins back to the first.
-            Vec2D Previous = Vertices.back();
-            for( const Vec2D& Vertex : Vertices )
-            {
-                mSegments.push_back( CSegment{ Previous, Vertex } );
-                Previous = Vertex;
-            }
-        }
+        BuildSegments( mLoopReader.GetVertices() );
     }
 
     return Success;
+}
+
+
+//-----------------------------------------------------------------------------
+void CLoopShape::BuildSegments( const std::vector<Vec2D>& arVertices )
+{
+    mSegments.clear();
+
+    // Close the loop: the last vertex joins back up to the first one.
+    Vec2D Previous = arVertices.back();
+    for( const Vec2D& Vertex : arVertices )
+    {
+        mSegments.push_back( CSegment{ Previous, Vertex } );
+        Previous = Vertex;
+    }
 }
 
 
@@ -53,16 +76,21 @@ const CPose& CLoopShape::GetStartPose() const
 
 
 //-----------------------------------------------------------------------------
+// Checks every segment in turn and keeps whichever one comes out closest.
+// HaveNearest just means "is this the first segment we've checked", so the
+// very first distance found always gets kept as the starting best guess.
 float CLoopShape::DistanceToNearestSegment( Vec2D aPoint ) const
 {
-    float NearestDistance = -1.0f;
+    bool HaveNearest = false;
+    float NearestDistance = 0.0f;
 
     for( const CSegment& Segment : mSegments )
     {
         float Distance = DistancePointToSegment( aPoint, Segment );
-        if( NearestDistance < 0.0f || Distance < NearestDistance )
+        if( !HaveNearest || Distance < NearestDistance )
         {
             NearestDistance = Distance;
+            HaveNearest = true;
         }
     }
 
@@ -71,6 +99,10 @@ float CLoopShape::DistanceToNearestSegment( Vec2D aPoint ) const
 
 
 //-----------------------------------------------------------------------------
+// Checks every segment for where the ray crosses it, and keeps the closest
+// crossing found. Starting NearestDistance at aMaxRange means a ray that hits
+// nothing at all just reports aMaxRange, with no separate "nothing found" case
+// needed.
 float CLoopShape::RangeAlongRay( Vec2D aOrigin, float aAngle, float aMaxRange ) const
 {
     Vec2D Direction{ std::cos( aAngle ), std::sin( aAngle ) };
@@ -101,9 +133,10 @@ void CLoopShape::DrawSegments( CRender& arRender, float aThickness, Color aColou
 
 
 //-----------------------------------------------------------------------------
-// Shortest distance from aPoint to the nearest point on the segment (clamping
-// the projection to the segment's ends, so it is a true segment, not an
-// infinite line).
+// The shortest distance from aPoint to the segment. The point is allowed to
+// project anywhere along the segment's length, but that projection is clamped
+// to the two ends, so this measures against the real segment and not the
+// infinite line running through it.
 //-----------------------------------------------------------------------------
 float CLoopShape::DistancePointToSegment( Vec2D aPoint, const CSegment& arSegment )
 {
@@ -114,16 +147,18 @@ float CLoopShape::DistancePointToSegment( Vec2D aPoint, const CSegment& arSegmen
 
     float SegmentLengthSquared = SegmentVector.x * SegmentVector.x + SegmentVector.y * SegmentVector.y;
 
-    float T = 0.0f;
+    // How far along the segment (0 at the start, 1 at the end) the point
+    // lands, clamped so the closest point stays on the segment itself.
+    float Projection = 0.0f;
     if( SegmentLengthSquared > Epsilon )
     {
-        T = ( StartToPoint.x * SegmentVector.x + StartToPoint.y * SegmentVector.y ) / SegmentLengthSquared;
-        T = std::max( 0.0f, std::min( 1.0f, T ) );
+        Projection = ( StartToPoint.x * SegmentVector.x + StartToPoint.y * SegmentVector.y ) / SegmentLengthSquared;
+        Projection = std::max( 0.0f, std::min( 1.0f, Projection ) );
     }
 
     Vec2D ClosestPoint{
-        arSegment.mStart.x + T * SegmentVector.x,
-        arSegment.mStart.y + T * SegmentVector.y
+        arSegment.mStart.x + Projection * SegmentVector.x,
+        arSegment.mStart.y + Projection * SegmentVector.y
     };
 
     Vec2D Delta{ aPoint.x - ClosestPoint.x, aPoint.y - ClosestPoint.y };
@@ -133,30 +168,32 @@ float CLoopShape::DistancePointToSegment( Vec2D aPoint, const CSegment& arSegmen
 
 
 //-----------------------------------------------------------------------------
-// Distance along the ray (aOrigin + t * aDirection, t >= 0) to where it meets
-// the segment, or -1 if the ray misses it (parallel, or the meeting point
-// falls before the ray's start or outside the segment).
+// Where the ray (aOrigin plus t times aDirection, for t >= 0) crosses the
+// segment. Returns -1 if it never does: the ray and segment run parallel, the
+// crossing point falls behind the ray's start, or it falls outside the
+// segment's two ends.
 //-----------------------------------------------------------------------------
 float CLoopShape::RayIntersectSegment( Vec2D aOrigin, Vec2D aDirection, const CSegment& arSegment )
 {
     const float Epsilon = 1.0e-6f;
+    const float NoIntersection = -1.0f;   // returned when the ray misses the segment
 
     Vec2D SegmentVector{ arSegment.mEnd.x - arSegment.mStart.x, arSegment.mEnd.y - arSegment.mStart.y };
     Vec2D OriginToStart{ arSegment.mStart.x - aOrigin.x, arSegment.mStart.y - aOrigin.y };
 
-    // 2D "cross product": aDirection x SegmentVector.
+    // The 2D "cross product" of aDirection and SegmentVector.
     float Denominator = aDirection.x * SegmentVector.y - aDirection.y * SegmentVector.x;
 
-    float Result = -1.0f;
+    float Result = NoIntersection;
 
     if( std::fabs( Denominator ) > Epsilon )
     {
-        float T = ( OriginToStart.x * SegmentVector.y - OriginToStart.y * SegmentVector.x ) / Denominator;
-        float U = ( OriginToStart.x * aDirection.y - OriginToStart.y * aDirection.x ) / Denominator;
+        float RayDistance = ( OriginToStart.x * SegmentVector.y - OriginToStart.y * SegmentVector.x ) / Denominator;
+        float SegmentFraction = ( OriginToStart.x * aDirection.y - OriginToStart.y * aDirection.x ) / Denominator;
 
-        if( T >= 0.0f && U >= 0.0f && U <= 1.0f )
+        if( RayDistance >= 0.0f && SegmentFraction >= 0.0f && SegmentFraction <= 1.0f )
         {
-            Result = T;
+            Result = RayDistance;
         }
     }
 

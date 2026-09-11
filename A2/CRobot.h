@@ -1,19 +1,14 @@
 //-----------------------------------------------------------------------------
 // CRobot.h
 //
-// The common half of every robot in the simulator: it owns the pose, the
-// drive train, the trail, the update and collision counts, and it runs the
-// fixed-timestep Update() loop and the drawing. What it does NOT know is how
-// this particular robot senses the world or how it steers - those are the two
-// pure-virtual hooks a subclass fills in.
+// A CRobot is the common part of every robot in the simulation. It keeps
+// track of where the robot is, drives its wheels, remembers its trail, and
+// counts how many steps it has taken and how many times it has hit a wall.
 //
-//   Update()  ->  Sense()            (subclass reads its own sensors)
-//             ->  SteerFromSensors() (subclass sets wheel speeds)
-//             ->  advance one timestep, reject the move on collision
-//             ->  extend the trail, bump the counters
-//
-// CWallFollowerRobot and CLineFollowerRobot differ only in those two hooks and
-// in which sensors they carry.
+// It does not know how to sense the world or how to steer. Each specific kind
+// of robot - the wall follower, the line follower - fills in Sense() and
+// SteerFromSensors() to do that its own way. Everything else about running
+// the robot happens here, once, for both kinds.
 //-----------------------------------------------------------------------------
 
 #ifndef CROBOT_H
@@ -33,61 +28,59 @@ class CRobot
 {
     public:
         //---Ctor/Dtor---
-        // arStartPose: where the robot begins.
-        // arRoom: the room this robot collides against (and, for the wall
-        //   follower, senses against). Not owned; only a reference is kept.
-        // aBodyColour: the colour the body disc is drawn in.
+        // arStartPose:  where the robot begins.
+        // arRoom:  the room this robot checks for walls (and, for the wall
+        //   follower, senses against). Not owned, just a reference.
+        // aBodyColour:  the colour the robot's body and trail are drawn in.
         CRobot( const CPose& arStartPose, const CRoom& arRoom, Color aBodyColour );
-        virtual ~CRobot() = default;
+        virtual ~CRobot();
 
         //---Simulation---
-        // Advances the robot by one fixed simulated time step.
-        void Update();
+        void Update();   // moves the robot forward by one fixed time step
 
         //---Rendering---
-        void Draw( CRender& arRender ) const;
+        void Draw( CRender& arRender ) const;   // draws the trail, the body, and which way it's facing
 
         //---Reporting---
-        int GetUpdateCount() const;
-        int GetCollisionCount() const;
-        virtual std::string Name() const = 0;
+        int GetUpdateCount() const;             // how many steps the robot has taken
+        int GetCollisionCount() const;          // how many times it has hit a wall
+        virtual std::string Name() const = 0;   // the robot's name, e.g. "Wall follower"
 
     protected:
-        //---Hooks every concrete robot must supply---
-        virtual void Sense() = 0;              // read this robot's own sensors
-        virtual void SteerFromSensors() = 0;   // set wheel speeds from those readings
+        //---Every specific robot has to write these two functions itself---
+        virtual void Sense() = 0;              // checks the robot's own sensors
+        virtual void SteerFromSensors() = 0;   // works out the wheel speeds from what the sensors found
 
-        //---The only state a subclass needs to reach. Kept protected (not
-        //   public, and the rest of the state private) so that only the robot
-        //   subclasses can touch it.---
-        const CPose& Pose() const;             // sensors need the current pose
-        const CRoom& Room() const;             // range sensors sense against it
-        void SetWheelSpeeds( float aLeft, float aRight );   // the only drive path
-        float BaseSpeed() const;               // straight-line wheel speed
+        //---The only parts a specific robot is allowed to touch. Everything
+        //   else stays private, so only CRobot itself can change it.---
+        const CPose& Pose() const;             // where the robot currently is
+        const CRoom& Room() const;             // the room its sensors check against
+        void SetWheelSpeeds( float aLeft, float aRight );   // the only way to change the wheel speeds
+        float BaseSpeed() const;               // the wheel speed used when driving straight
 
     private:
-        //---Collision test---
+        //---True if the robot would be touching a wall at arTentativePose---
         bool HasCollided( const CPose& arTentativePose ) const;
 
-        //---Geometry and tuning, fixed for the life of the robot---
-        const float mRadius;      // body radius; fixed by the spec at 15
-        const float mAxleWidth;   // distance between the two wheels
-        const float mBaseSpeed;   // wheel speed when driving straight
-        const float mTimeStep;    // simulated seconds advanced per Update()
+        //---Fixed measurements and settings, the same for the robot's whole life---
+        const float mRadius;      // the robot's radius, fixed at 15 by the spec
+        const float mAxleWidth;   // the distance between the two wheels
+        const float mBaseSpeed;   // the wheel speed used when driving straight
+        const float mTimeStep;    // how many simulated seconds pass in one Update()
 
-        //---State---
+        //---What changes as the robot runs---
         CPose mPose;
         CDriveTrain mDriveTrain;
         Color mBodyColour;
 
-        std::vector<Vec2D> mTrail;
+        std::vector<Vec2D> mTrail;   // one point per step; the ctor adds the very first one
 
         int mUpdateCount;
         int mCollisionCount;
-        bool mWasColliding;   // so a collision is counted once on entry, not
-                              // every frame the robot stays against the wall
+        bool mWasColliding;   // so a collision is only counted once when it starts,
+                              // not on every step the robot stays against the wall
 
-        const CRoom& mrRoom;   // sensed/collided against; not owned
+        const CRoom& mrRoom;   // the room this robot checks against; not owned
 };
 
 #endif

@@ -12,6 +12,8 @@ The code is split into two self-contained programs:
 - **`A2/`** — the Wall Follower **and** the Line Follower in one program, after
   the A1 classes were refactored into shared base classes. This is the active
   codebase.
+- **`A5/`** — the noise bonus: a copy of A2 with a randomised start pose,
+  per‑step wheel slip, and 20 of each robot type running at once.
 
 Each folder builds independently (see [Building and running](#building-and-running)).
 The vendored raylib files at the repo root are shared reference only. See
@@ -55,9 +57,32 @@ consts, enums, data and functions live inside classes).
 ```
 A1/                 wall follower only, frozen as submitted for A1
 A2/                 wall + line follower in one program (active)
+A5/                 noise bonus: copy of A2, randomised, 20 of each robot
 docs/superpowers/   design spec and the A1→A2 change log
 raylib.h, ...       vendored raylib, shared reference (not submitted)
 ```
+
+### A5 — files added or changed on top of A2
+
+`A5/` is a **standalone copy** of `A2/`, as the brief requires ("make a copy of
+your A2 program and augment it"). A2 is untouched by it.
+
+Only **one** new class (`CNoiseSource`); everything else is a small change to an
+existing A2 file.
+
+| File | Responsibility |
+|------|----------------|
+| `CNoiseSource.h/.cpp` | **New.** The only class that produces random numbers: holds the generator and the three noise sizes, and offers `ScatterStartPose()` (shift a start pose) and `AddWheelSlip()` (slip one wheel's step). One instance is made in `CSimulation` and shared by all 40 robots, so one seed fixes the whole run. |
+| `CDriveTrain.h/.cpp` | `Advance()` now works out the **distance each wheel moves this step**, adds a slip to each, then combines them (average = forward, difference = turn). Same motion as A2 with the slip removed. This is the only place the wheel noise enters. |
+| `CRobot.h/.cpp` | Takes the shared noise source. Adds a plain **distance‑based lap test** (`CheckLap()`: the robot must drive >150 units from its start, then return within 30). Parks once its lap is done. Trail is **sampled by distance** — an every‑step trail for 40 robots would be tens of thousands of segments per frame. Per‑collision console lines dropped (A5 doesn't count collisions; 40 robots would flood the console) — the counts are still kept and reported per type. `Draw()` split into `DrawTrail()` / `DrawBody()` for a two‑pass draw. |
+| `CRender.h/.cpp` | New `static Color Lighten( colour, fraction )` — mixes a colour toward white. Each robot in a group of 20 gets its own shade of the one family colour, so the trails can be told apart. |
+| `CSimulation.h/.cpp` | Holds two `std::vector<std::unique_ptr<CRobot>>` groups. Builds 40 robots with scattered start poses, owns the noise source, and ends the run itself once both groups have finished (or the step cap is hit), holding the finished picture for the screenshot. |
+
+`CLoopShape` and every other A2 file are copied across unchanged. The changes to
+the A1‑heritage files (`CDriveTrain`, `CRender`, `CWallFollowerRobot`) are the
+functional minimum for the noise/shade feature, kept in the heritage style — no
+comment rewrite. (`A5/CRender.cpp` also gets a real window‑title string in place
+of the placeholder.)
 
 ### A2 — files added or changed on top of A1
 
@@ -184,10 +209,26 @@ g++ -Wall -Wextra -std=c++17 \
     main.cpp CRoom.cpp CRangeSensor.cpp CDriveTrain.cpp \
     CWallFollowerRobot.cpp CLoopReader.cpp CRender.cpp \
     -lraylib -o WallFollower
+
+# A5 (noise bonus: 20 of each robot type)
+cd A5
+g++ -Wall -Wextra -std=c++17 \
+    main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp \
+    CRangeSensor.cpp CLineSensor.cpp CNoiseSource.cpp CDriveTrain.cpp \
+    CRobot.cpp CWallFollowerRobot.cpp CLineFollowerRobot.cpp \
+    CLoopReader.cpp CRender.cpp \
+    -lraylib -o NoiseBonus
+
+./NoiseBonus
 ```
 
-Close the window to end the run; the per‑robot summary (updates completed, total
-collisions) prints to the console.
+For A1 and A2, close the window to end the run; the per‑robot summary (updates
+completed, total collisions) prints to the console.
+
+A5 instead **ends by itself** once every robot has finished its lap (or at the
+2500‑step cap), prints its summary at that moment, and holds the finished
+picture on screen — so the console can be read and the screenshot taken while
+the window is still up. Close the window when done.
 
 ### Windows (MSYS2 / UCRT64) — what applies on this machine
 
@@ -212,15 +253,25 @@ pacman -S --needed mingw-w64-ucrt-x86_64-raylib
 ## Status
 
 - [x] **A1 — Wall Follower**: implemented, frozen in `A1/`.
-- [~] **A2 — Line Follower**: refactor done (`CRobot` / `CLoopShape` base
-      classes, `CSimulation`, line sensor and line‑follower robot). Both
-      programs build clean with `-Wall -Wextra -std=c++17`. Remaining: the
-      line‑following control law (`CLineFollowerRobot::SteerFromSensors` is a
-      stub that drives straight), tuning, and a runtime check.
+- [x] **A2 — Line Follower**: code complete. `CRobot` / `CLoopShape` base
+      classes, `CSimulation`, `CLineSensor`, `CLineFollowerRobot` with a tuned
+      bang‑bang control law. Both programs build clean with
+      `-Wall -Wextra -std=c++17`. A Week 1–4 style pass has been done on the
+      **new** A2 classes (short class comments, a comment on every header
+      function, ctors/dtors declared in the header and defined in the `.cpp`);
+      the six A1‑heritage files are left as they were, on purpose — their known
+      rough edges are the A3 "style to improve" answer. Remaining: end‑of‑run
+      screenshot + console capture for the report.
 - [ ] **A0 / A3** report sections. See `docs/superpowers/specs/` for the design
       spec and the A1→A2 change log (A3 material).
 - [ ] **A4 — ROS 2** tutorials + `House` plugin.
-- [ ] **A5 — Noise** bonus.
+- [x] **A5 — Noise bonus**: code complete in `A5/` — one new class
+      (`CNoiseSource`) plus small changes to five A2 files. Builds clean with
+      `-Wall -Wextra -std=c++17`. Verified headlessly (stub raylib, see
+      `docs/HANDOFF.md`): at the committed seed all **20 of 20** wall followers
+      and **20 of 20** line followers finish their loops in ~1900 steps, and
+      that holds across six seeds. Remaining: the end‑of‑run screenshot and
+      console capture from a real desktop run.
 
 ### Submission reminders
 

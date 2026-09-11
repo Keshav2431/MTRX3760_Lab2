@@ -1,18 +1,18 @@
 //-----------------------------------------------------------------------------
 // CFloorLine.cpp
 //
-// Implements CFloorLine. Like CRoom, both members sit one line on top of
-// CLoopShape: a point is "on the line" when the nearest segment is within
-// half the line width, and drawing is the shared segment loop in the line
-// style.
+// Both of these are one small step on top of CLoopShape: a point is on the
+// line when the nearest segment is within half the line's width, and drawing
+// the line is just drawing the shared segment loop in the line's own colour.
 //-----------------------------------------------------------------------------
 
 #include "CFloorLine.h"
 
-//---The line is 5 units wide for sensing; a point within 2.5 of a segment is
-//   on it. Drawn a little wider so it reads clearly under the robot.--------
-const float CFloorLine::kHalfWidth     = 2.5f;
-const float CFloorLine::kDrawThickness = 5.0f;
+//---The spec fixes the line at 5 units wide for sensing. It is also drawn at
+//   that width, so the picture on screen matches what the sensors see.------
+const float CFloorLine::kLineWidth     = 5.0f;
+const float CFloorLine::kHalfWidth     = kLineWidth / 2.0f;
+const float CFloorLine::kDrawThickness = kLineWidth;
 
 //-----------------------------------------------------------------------------
 bool CFloorLine::IsLineUnder( Vec2D aPoint ) const

@@ -1,0 +1,4203 @@
+\newpage
+\appendix
+\section*{Code Appendix}
+
+% ===========================================================================
+% A1: Wall Follower -- every .h/.cpp file, in full
+% ===========================================================================
+%--- A1 ---
+
+\subsection*{A1: CDriveTrain.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CDriveTrain.cpp
+//-----------------------------------------------------------------------------
+
+#include "CDriveTrain.h"
+
+#include <cmath>
+
+//-----------------------------------------------------------------------------
+CDriveTrain::CDriveTrain( float aAxleWidth )
+    :
+        mAxleWidth( aAxleWidth ),
+        mLeftSpeed( 0.0f ),
+        mRightSpeed( 0.0f )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+void CDriveTrain::SetWheelSpeeds( float aLeftSpeed, float aRightSpeed )
+{
+    mLeftSpeed = aLeftSpeed;
+    mRightSpeed = aRightSpeed;
+}
+
+
+//-----------------------------------------------------------------------------
+CPose CDriveTrain::Advance( const CPose& arPose, float aTimeStep ) const
+{
+    float ForwardSpeed = 0.5f * ( mLeftSpeed + mRightSpeed );
+    float AngularSpeed = ( mLeftSpeed - mRightSpeed ) / mAxleWidth;
+
+    CPose NewPose = arPose;
+
+    NewPose.mPosition.x += ForwardSpeed * std::cos( arPose.mHeading ) * aTimeStep;
+    NewPose.mPosition.y += ForwardSpeed * std::sin( arPose.mHeading ) * aTimeStep;
+    NewPose.mHeading    += AngularSpeed * aTimeStep;
+
+    return NewPose;
+}
+\end{lstlisting}
+
+\subsection*{A1: CDriveTrain.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CDriveTrain.h
+//
+// A two-wheeled differential drive train. It knows nothing about sensing or
+// control strategy: it is simply told a speed for each wheel, and can then
+// advance a given pose by one fixed time step according to those speeds.
+//
+// Coordinates follow the convention used throughout this project: x right,
+// y down, heading in radians measured clockwise from +x. With that
+// convention, driving the left wheel faster than the right turns the robot
+// anticlockwise (heading decreases); driving the right wheel faster turns it
+// clockwise (heading increases).
+//-----------------------------------------------------------------------------
+
+#ifndef CDRIVETRAIN_H
+#define CDRIVETRAIN_H
+
+#include "CLoopReader.h"   // for CPose
+
+//-----------------------------------------------------------------------------
+class CDriveTrain
+{
+    public:
+        //---Ctor---
+        explicit CDriveTrain( float aAxleWidth );
+
+        //---Control---
+        void SetWheelSpeeds( float aLeftSpeed, float aRightSpeed );
+
+        //---Simulation---
+        // Returns the pose that results from starting at arPose and driving
+        // at the current wheel speeds for aTimeStep seconds of simulated
+        // time. Does not modify arPose or any state of its own.
+        CPose Advance( const CPose& arPose, float aTimeStep ) const;
+
+    private:
+        const float mAxleWidth;
+
+        float mLeftSpeed;
+        float mRightSpeed;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: CLoopReader.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLoopReader.cpp
+//
+// Reads a loop file into a single loop. The file format is described at the top
+// of CLoopReader.h. ReadFile ignores blank lines and '#' comments, and stops
+// with a clear message naming the line if it meets something it cannot parse.
+//-----------------------------------------------------------------------------
+
+#include "CLoopReader.h"
+
+#include <cmath>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+
+//---Degrees in the file are converted to radians for use in the program.------
+static const float kPi = 3.14159265358979323846f;
+static const float kDegreesToRadians = kPi / 180.0f;
+
+
+//-----------------------------------------------------------------------------
+CLoopReader::CLoopReader()
+    :
+        mStartPose( { { 0.0f, 0.0f }, 0.0f } )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+const std::string& CLoopReader::GetName() const
+{
+    return mName;
+}
+
+
+//-----------------------------------------------------------------------------
+const CPose& CLoopReader::GetStartPose() const
+{
+    return mStartPose;
+}
+
+
+//-----------------------------------------------------------------------------
+const std::vector<Vec2D>& CLoopReader::GetVertices() const
+{
+    return mVertices;
+}
+
+
+//-----------------------------------------------------------------------------
+bool CLoopReader::ReadFile( const std::string& arFilename )
+{
+    bool Okay = true;
+
+    std::ifstream File( arFilename );
+    if( !File )
+    {
+        std::cout << "CLoopReader: could not open file '" << arFilename << "'" << std::endl;
+        Okay = false;
+    }
+
+    std::string Line;
+    int LineNumber = 0;
+    bool HaveLoop = false;
+
+    while( Okay && std::getline( File, Line ) )
+    {
+        ++LineNumber;
+
+        // Strip any comment: everything from a '#' to the end of the line.
+        std::string::size_type Hash = Line.find( '#' );
+        if( Hash != std::string::npos )
+        {
+            Line = Line.substr( 0, Hash );
+        }
+
+        // Split the remaining line into whitespace-separated words. A line with
+        // no words (blank, or comment-only) has no keyword and is skipped.
+        std::istringstream Words( Line );
+        std::string Keyword;
+        if( Words >> Keyword )
+        {
+            if( Keyword == "loop" )
+            {
+                if( HaveLoop )
+                {
+                    std::cout << "CLoopReader: a second 'loop' on line " << LineNumber
+                              << " (a file describes one loop)" << std::endl;
+                    Okay = false;
+                }
+                else if( !(Words >> mName) )
+                {
+                    std::cout << "CLoopReader: 'loop' needs a name on line "
+                              << LineNumber << std::endl;
+                    Okay = false;
+                }
+                else
+                {
+                    HaveLoop = true;
+                }
+            }
+            else if( Keyword == "startpose" )
+            {
+                float X = 0.0f;
+                float Y = 0.0f;
+                float HeadingDegrees = 0.0f;
+                if( !(Words >> X >> Y >> HeadingDegrees) )
+                {
+                    std::cout << "CLoopReader: 'startpose' needs x, y and heading on line "
+                              << LineNumber << std::endl;
+                    Okay = false;
+                }
+                else if( !HaveLoop )
+                {
+                    std::cout << "CLoopReader: 'startpose' before any 'loop' on line "
+                              << LineNumber << std::endl;
+                    Okay = false;
+                }
+                else
+                {
+                    mStartPose = CPose{ { X, Y }, HeadingDegrees * kDegreesToRadians };
+                }
+            }
+            else if( Keyword == "vertex" )
+            {
+                float X = 0.0f;
+                float Y = 0.0f;
+                if( !(Words >> X >> Y) )
+                {
+                    std::cout << "CLoopReader: 'vertex' needs x and y on line "
+                              << LineNumber << std::endl;
+                    Okay = false;
+                }
+                else if( !HaveLoop )
+                {
+                    std::cout << "CLoopReader: 'vertex' before any 'loop' on line "
+                              << LineNumber << std::endl;
+                    Okay = false;
+                }
+                else
+                {
+                    mVertices.push_back( { X, Y } );
+                }
+            }
+            else
+            {
+                std::cout << "CLoopReader: unknown keyword '" << Keyword << "' on line "
+                          << LineNumber << std::endl;
+                Okay = false;
+            }
+        }
+    }
+    
+    return Okay;
+}
+\end{lstlisting}
+
+\subsection*{A1: CLoopReader.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLoopReader.h
+//
+// Reads a loop file and stores the single closed loop it describes: a name, a
+// starting pose, and a list of vertices. A loop file describes a shape only;
+// it knows nothing about rooms, lines or robots. SimpleWalls.map and
+// SimpleLine.map are two example files.
+//
+//
+// FILE FORMAT
+//
+// One instruction per line. The first word says what the line is; the rest
+// are its values. Blank lines are ignored. Anything from a '#' to the end of a
+// line is a comment and is ignored. Words are separated by spaces. A file
+// describes one loop.
+//
+//   loop <name>              Name the loop. One per file.
+//   startpose <x> <y> <deg>  The loop's starting pose: a point on or near the
+//                            loop and a heading.
+//   vertex <x> <y>           One corner of the loop. The last vertex is
+//                            understood to join back to the first.
+//
+//
+// COORDINATES
+//
+// Positions are in the space the renderer draws in: x runs left to right, y
+// runs top to bottom, in an 800 x 600 window. Headings are in degrees,
+// measured clockwise from the positive x axis (0 right, 90 down, 180 left,
+// 270 up), and are converted to radians as the file is read.
+//
+//
+// This is a starting point. Construct a reader, call ReadFile to load a file,
+// or adapt it to suit your own design.
+//-----------------------------------------------------------------------------
+
+#ifndef CLOOPREADER_H
+#define CLOOPREADER_H
+
+#include "CRender.h"   // for Vec2D
+
+#include <string>
+#include <vector>
+
+//-----------------------------------------------------------------------------
+// A pose: a position together with a heading, in radians.
+//-----------------------------------------------------------------------------
+struct CPose
+{
+    Vec2D mPosition;
+    float mHeading;   // radians; 0 faces +x (right), PI/2 faces +y (down)
+};
+
+//-----------------------------------------------------------------------------
+// CLoopReader: reads one loop file and stores the closed loop it describes.
+//-----------------------------------------------------------------------------
+class CLoopReader
+{
+    public:
+        //---Ctor---
+        CLoopReader();
+
+        //---File reading---
+        bool ReadFile( const std::string& arFilename );
+
+        //---Access to the loop that was read---
+        const std::string& GetName() const;
+        const CPose& GetStartPose() const;
+        const std::vector<Vec2D>& GetVertices() const;
+
+    private:
+        //---The loop---
+        std::string mName;
+        CPose mStartPose;
+        std::vector<Vec2D> mVertices;   // the loop's corners; last joins to first
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: CRangeSensor.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRangeSensor.cpp
+//-----------------------------------------------------------------------------
+
+#include "CRangeSensor.h"
+#include "CRoom.h"
+
+//-----------------------------------------------------------------------------
+CRangeSensor::CRangeSensor( float aMountAngle, float aMaxRange )
+    :
+        mMountAngle( aMountAngle ),
+        mMaxRange( aMaxRange )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+float CRangeSensor::Sense( const CPose& arRobotPose, const CRoom& arRoom ) const
+{
+    float WorldAngle = arRobotPose.mHeading + mMountAngle;
+
+    return arRoom.RangeToWall( arRobotPose.mPosition, WorldAngle, mMaxRange );
+}
+\end{lstlisting}
+
+\subsection*{A1: CRangeSensor.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRangeSensor.h
+//
+// A single range sensor, rigidly mounted on a robot at some fixed angle
+// relative to the robot's heading. Given the robot's current pose and the
+// room it is in, it reports the distance to the nearest wall along its beam.
+//
+// A CRangeSensor knows nothing about which robot it is mounted on, or how
+// many other sensors that robot carries; it is handed a pose each time it is
+// asked to sense.
+//-----------------------------------------------------------------------------
+
+#ifndef CRANGESENSOR_H
+#define CRANGESENSOR_H
+
+#include "CLoopReader.h"   // for CPose
+
+class CRoom;   // forward declaration: only used here by const reference
+
+//-----------------------------------------------------------------------------
+class CRangeSensor
+{
+    public:
+        //---Ctor---
+        // aMountAngle: the sensor's direction relative to the robot's heading,
+        // in radians (0 = straight ahead, positive = clockwise, matching the
+        // heading convention used throughout the loop files and CPose).
+        // aMaxRange: the furthest distance the sensor can report.
+        CRangeSensor( float aMountAngle, float aMaxRange );
+
+        //---Sensing---
+        float Sense( const CPose& arRobotPose, const CRoom& arRoom ) const;
+
+    private:
+        const float mMountAngle;
+        const float mMaxRange;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: CRender.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRender.cpp
+//
+// Implementation of the raylib wrapper. The :: prefix on the raylib calls says
+// "the global one", distinguishing raylib's DrawCircle from our member function
+// of the same name.
+//-----------------------------------------------------------------------------
+
+#include "CRender.h"
+
+//-----------------------------------------------------------------------------
+CRender::CRender()
+    :
+        mScreenWidth( 800 ),
+        mScreenHeight( 600 )
+{
+    InitWindow( mScreenWidth, mScreenHeight, "TODO: Replace This Text" );
+    SetTargetFPS( 60 );
+}
+
+int CRender::GetScreenWidth() const
+{
+    return mScreenWidth;
+}
+
+int CRender::GetScreenHeight() const
+{
+    return mScreenHeight;
+}
+
+bool CRender::WindowShouldClose()
+{
+    bool Result = ::WindowShouldClose();
+    return Result;
+}
+
+void CRender::CloseWindow()
+{
+    ::CloseWindow();
+}
+
+void CRender::BeginDrawing()
+{
+    ::BeginDrawing();
+    ::ClearBackground( BLACK );
+}
+
+void CRender::EndDrawing()
+{
+    ::EndDrawing();
+}
+
+void CRender::DrawCircle( Vec2D aPosition, int aRadius, Color aColor )
+{
+    ::DrawCircle( aPosition.x, aPosition.y, aRadius, aColor );
+}
+
+void CRender::DrawLine( Vec2D aStart, Vec2D aEnd, float aThickness, Color aColor )
+{
+    Vector2 Start = { aStart.x, aStart.y };
+    Vector2 End = { aEnd.x, aEnd.y };
+
+    ::DrawLineEx( Start, End, aThickness, aColor );
+}
+\end{lstlisting}
+
+\subsection*{A1: CRender.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRender.h
+//
+// A thin wrapper around the raylib graphics library. Everything raylib-specific
+// is hidden behind this class, so the rest of the program never includes
+// raylib.h and never sees a raylib type.
+//
+//
+// INSTALLING RAYLIB ON YOUR OWN MACHINE (you have sudo)
+//
+//     sudo add-apt-repository ppa:texus/raylib
+//     sudo apt update
+//     sudo apt install libraylib5-dev
+//
+// Find the raylib header and read it. It is a single file listing every
+// function raylib offers, one per line, each with a comment. Worth a look.
+//
+//     sudo updatedb
+//     locate raylib.h
+//
+// The updatedb is only necessary once, to update your search database.
+// Locate reports something like /usr/include/raylib.h, which you can open
+// with your favourite editor.
+//
+//
+// INSTALLING RAYLIB ON A LAB MACHINE (you do not have sudo)
+//
+// apt needs root, so build raylib from source and install it into your own
+// home directory instead. This takes about a minute.
+//
+// It does not matter where you unpack the source, because the finished library
+// is installed into $HOME/raylib either way. Start from your home directory,
+// and keep the source tree out of your project folder so you do not submit it.
+//
+//     cd $HOME
+//     git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+//     cd raylib-src
+//     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/raylib -DBUILD_EXAMPLES=OFF
+//     cmake --build build -j$( nproc )
+//     cmake --install build
+//
+// You only need to do that once. The raylib-src folder can be deleted
+// afterwards if you want the space back; $HOME/raylib is the part that matters.
+// Now change back into the folder holding your own source files to build.
+//
+// The header is then in your home directory, and you can read it with:
+//
+//     less $HOME/raylib/include/raylib.h
+//
+// raylib builds as a static library, so no further setup is needed to run it.
+//
+//
+// BUILDING
+//
+// The build command differs between the two cases above. See TestRender.cpp for
+// both versions.
+//-----------------------------------------------------------------------------
+
+#ifndef CRENDER_H
+#define CRENDER_H
+
+#include "raylib.h"
+
+//-----------------------------------------------------------------------------
+struct Vec2D
+{
+    float x;
+    float y;
+};
+
+//-----------------------------------------------------------------------------
+class CRender
+{
+    public:
+        //---Ctor/Dtor---
+        CRender();
+
+        //---Util---
+        bool WindowShouldClose();
+        void CloseWindow();
+
+        //---Drawing---
+        void BeginDrawing();
+        void EndDrawing();
+
+        void DrawCircle( Vec2D aPosition, int aRadius, Color aColor );
+        void DrawLine( Vec2D aStart, Vec2D aEnd, float aThickness, Color aColor );
+
+        //---Access to the window---
+        int GetScreenWidth() const;
+        int GetScreenHeight() const;
+
+    private:
+        //---The window---
+        const int mScreenWidth;
+        const int mScreenHeight;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: CRoom.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRoom.cpp
+//
+// Implements CRoom. LoadFromFile turns the loop's vertices into a closed
+// chain of CWallSegments (last vertex joins back to the first, matching the
+// loop file format described in CLoopReader.h). RangeToWall and IsColliding
+// are both simple "test every wall segment, keep the best result" loops built
+// on top of two small geometry helpers.
+//-----------------------------------------------------------------------------
+
+#include "CRoom.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+bool CRoom::LoadFromFile( const std::string& arFilename )
+{
+    bool Success = mLoopReader.ReadFile( arFilename );
+
+    if( Success )
+    {
+        mWalls.clear();
+
+        const std::vector<Vec2D>& Vertices = mLoopReader.GetVertices();
+        if( Vertices.empty() )
+        {
+            std::cout << "CRoom: '" << arFilename << "' contains no vertices" << std::endl;
+            Success = false;
+        }
+        else
+        {
+            // Close the loop: the last vertex joins back to the first.
+            Vec2D Previous = Vertices.back();
+            for( const Vec2D& Vertex : Vertices )
+            {
+                mWalls.push_back( CWallSegment{ Previous, Vertex } );
+                Previous = Vertex;
+            }
+        }
+    }
+
+    return Success;
+}
+
+
+//-----------------------------------------------------------------------------
+const CPose& CRoom::GetStartPose() const
+{
+    return mLoopReader.GetStartPose();
+}
+
+
+//-----------------------------------------------------------------------------
+float CRoom::RangeToWall( Vec2D aOrigin, float aAngle, float aMaxRange ) const
+{
+    Vec2D Direction{ std::cos( aAngle ), std::sin( aAngle ) };
+
+    float NearestDistance = aMaxRange;
+
+    for( const CWallSegment& Wall : mWalls )
+    {
+        float Distance = RayIntersectSegment( aOrigin, Direction, Wall );
+        if( Distance >= 0.0f && Distance < NearestDistance )
+        {
+            NearestDistance = Distance;
+        }
+    }
+
+    return NearestDistance;
+}
+
+
+//-----------------------------------------------------------------------------
+bool CRoom::IsColliding( Vec2D aPosition, float aRadius ) const
+{
+    bool Colliding = false;
+
+    for( const CWallSegment& Wall : mWalls )
+    {
+        if( DistancePointToSegment( aPosition, Wall ) < aRadius )
+        {
+            Colliding = true;
+            break;
+        }
+    }
+
+    return Colliding;
+}
+
+
+//-----------------------------------------------------------------------------
+void CRoom::Draw( CRender& arRender ) const
+{
+    const float WallThickness = 2.0f;
+
+    for( const CWallSegment& Wall : mWalls )
+    {
+        arRender.DrawLine( Wall.mStart, Wall.mEnd, WallThickness, RAYWHITE );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+// Shortest distance from aPoint to the nearest point on the segment (clamping
+// the projection to the segment's ends, so it is a true segment, not an
+// infinite line).
+//-----------------------------------------------------------------------------
+float CRoom::DistancePointToSegment( Vec2D aPoint, const CWallSegment& arSegment )
+{
+    const float Epsilon = 1.0e-6f;
+
+    Vec2D SegmentVector{ arSegment.mEnd.x - arSegment.mStart.x, arSegment.mEnd.y - arSegment.mStart.y };
+    Vec2D StartToPoint{ aPoint.x - arSegment.mStart.x, aPoint.y - arSegment.mStart.y };
+
+    float SegmentLengthSquared = SegmentVector.x * SegmentVector.x + SegmentVector.y * SegmentVector.y;
+
+    float T = 0.0f;
+    if( SegmentLengthSquared > Epsilon )
+    {
+        T = ( StartToPoint.x * SegmentVector.x + StartToPoint.y * SegmentVector.y ) / SegmentLengthSquared;
+        T = std::max( 0.0f, std::min( 1.0f, T ) );
+    }
+
+    Vec2D ClosestPoint{
+        arSegment.mStart.x + T * SegmentVector.x,
+        arSegment.mStart.y + T * SegmentVector.y
+    };
+
+    Vec2D Delta{ aPoint.x - ClosestPoint.x, aPoint.y - ClosestPoint.y };
+
+    return std::sqrt( Delta.x * Delta.x + Delta.y * Delta.y );
+}
+
+
+//-----------------------------------------------------------------------------
+// Distance along the ray (aOrigin + t * aDirection, t >= 0) to where it meets
+// the segment, or -1 if the ray misses it (parallel, or the meeting point
+// falls before the ray's start or outside the segment).
+//-----------------------------------------------------------------------------
+float CRoom::RayIntersectSegment( Vec2D aOrigin, Vec2D aDirection, const CWallSegment& arSegment )
+{
+    const float Epsilon = 1.0e-6f;
+
+    Vec2D SegmentVector{ arSegment.mEnd.x - arSegment.mStart.x, arSegment.mEnd.y - arSegment.mStart.y };
+    Vec2D OriginToStart{ arSegment.mStart.x - aOrigin.x, arSegment.mStart.y - aOrigin.y };
+
+    // 2D "cross product": aDirection x SegmentVector.
+    float Denominator = aDirection.x * SegmentVector.y - aDirection.y * SegmentVector.x;
+
+    float Result = -1.0f;
+
+    if( std::fabs( Denominator ) > Epsilon )
+    {
+        float T = ( OriginToStart.x * SegmentVector.y - OriginToStart.y * SegmentVector.x ) / Denominator;
+        float U = ( OriginToStart.x * aDirection.y - OriginToStart.y * aDirection.x ) / Denominator;
+
+        if( T >= 0.0f && U >= 0.0f && U <= 1.0f )
+        {
+            Result = T;
+        }
+    }
+
+    return Result;
+}
+\end{lstlisting}
+
+\subsection*{A1: CRoom.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRoom.h
+//
+// A room made of straight walls, loaded from a loop file via CLoopReader.
+// CRoom turns the loop's vertices into a closed chain of wall segments, and
+// answers the two questions a robot needs of its environment:
+//
+//   - "How far away is the nearest wall in this direction?" (RangeToWall)
+//   - "Am I touching a wall?"                                (IsColliding)
+//
+// It also knows how to draw itself. Nothing outside CRoom needs to know that
+// a room is really a sequence of line segments; that is the whole point of
+// wrapping it up here rather than leaving CLoopReader's vertex list exposed.
+//-----------------------------------------------------------------------------
+
+#ifndef CROOM_H
+#define CROOM_H
+
+#include "CRender.h"       // for Vec2D
+#include "CLoopReader.h"   // for CPose
+
+#include <string>
+#include <vector>
+
+//-----------------------------------------------------------------------------
+class CRoom
+{
+    public:
+        //---Loading---
+        bool LoadFromFile( const std::string& arFilename );
+
+        //---Access---
+        const CPose& GetStartPose() const;
+
+        //---Sensing---
+        // Casts a ray from aOrigin in direction aAngle (radians, 0 = +x,
+        // increasing clockwise) and returns the distance to the nearest wall
+        // it meets, or aMaxRange if no wall is within that range.
+        float RangeToWall( Vec2D aOrigin, float aAngle, float aMaxRange ) const;
+
+        //---Collision---
+        // True if a disc of radius aRadius centred at aPosition overlaps any
+        // wall of the room.
+        bool IsColliding( Vec2D aPosition, float aRadius ) const;
+
+        //---Rendering---
+        void Draw( CRender& arRender ) const;
+
+    private:
+        //---One straight wall, from mStart to mEnd---
+        struct CWallSegment
+        {
+            Vec2D mStart;
+            Vec2D mEnd;
+        };
+
+        //---Geometry helpers---
+        static float DistancePointToSegment( Vec2D aPoint, const CWallSegment& arSegment );
+        static float RayIntersectSegment( Vec2D aOrigin, Vec2D aDirection, const CWallSegment& arSegment );
+
+        //---The loop file this room was built from---
+        CLoopReader mLoopReader;
+
+        //---The room's walls, one per edge of the loop---
+        std::vector<CWallSegment> mWalls;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: CWallFollowerRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.cpp
+//
+// See CWallFollowerRobot.h for the overall design. The steering law used
+// here is a simple two-mode proportional controller:
+//
+//   - Normally, it holds the side sensor at mTargetWallDistance: too far
+//     from the wall and it steers toward it, too close and it steers away.
+//   - When the forward-right sensor sees a wall closing in (a corner, or the
+//     end of the current wall), that overrides the side control and steers
+//     the robot left, around the corner.
+//
+// Collisions are handled by rejecting the position part of a move that would
+// end inside a wall (keeping the heading change, so steering can still turn
+// the robot clear), and are only counted and reported on the frame the
+// robot first touches the wall, not on every frame it remains in contact.
+//-----------------------------------------------------------------------------
+
+#include "CWallFollowerRobot.h"
+#include "CRoom.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+//---Fixed by the assignment spec: two sensors, aimed 90 and 45 degrees right---
+static const float kPi = 3.14159265358979323846f;
+static const float kSideSensorAngle    = kPi / 2.0f;   // 90 degrees
+static const float kForwardSensorAngle = kPi / 4.0f;   // 45 degrees
+
+//---Steering error is clamped to this magnitude before scaling by a gain, so
+//   a lost sensor reading (returning mMaxSensorRange) cannot demand a wildly
+//   aggressive turn---
+static const float kMaxSteeringError = 100.0f;
+
+
+//-----------------------------------------------------------------------------
+CWallFollowerRobot::CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom )
+    :
+        mRadius( 15.0f ),
+        mAxleWidth( 26.0f ),
+        mBaseSpeed( 40.0f ),
+        mTimeStep( 0.05f ),
+        mMaxSensorRange( 300.0f ),
+        mTargetWallDistance( 60.0f ),
+        mSteeringGain( 0.9f ),
+        mCornerThreshold( 70.0f ),
+        mCornerGain( 1.4f ),
+        mPose( arStartPose ),
+        mDriveTrain( mAxleWidth ),
+        mSideSensor( kSideSensorAngle, mMaxSensorRange ),
+        mForwardSensor( kForwardSensorAngle, mMaxSensorRange ),
+        mSideReading( mMaxSensorRange ),
+        mForwardReading( mMaxSensorRange ),
+        mUpdateCount( 0 ),
+        mCollisionCount( 0 ),
+        mWasColliding( false ),
+        mrRoom( arRoom )
+{
+    mTrail.push_back( mPose.mPosition );
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::Update()
+{
+    mSideReading    = mSideSensor.Sense( mPose, mrRoom );
+    mForwardReading = mForwardSensor.Sense( mPose, mrRoom );
+
+    SteerFromSensors();
+
+    CPose TentativePose = mDriveTrain.Advance( mPose, mTimeStep );
+
+    if( HasCollided( TentativePose ) )
+    {
+        // Reject the position change but keep the new heading, so steering
+        // can still turn the robot clear of the wall on a later update.
+        mPose.mHeading = TentativePose.mHeading;
+
+        if( !mWasColliding )
+        {
+            ++mCollisionCount;
+            std::cout << "Collision #" << mCollisionCount
+                       << " at update " << mUpdateCount << std::endl;
+        }
+        mWasColliding = true;
+    }
+    else
+    {
+        mPose = TentativePose;
+        mWasColliding = false;
+    }
+
+    mTrail.push_back( mPose.mPosition );
+    ++mUpdateCount;
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::Draw( CRender& arRender ) const
+{
+    const float TrailThickness = 1.5f;
+    const float HeadingLineThickness = 2.0f;
+
+    // Trail, drawn as a chain of segments between consecutive stored points.
+    for( std::size_t i = 1; i < mTrail.size(); ++i )
+    {
+        arRender.DrawLine( mTrail[i - 1], mTrail[i], TrailThickness, GRAY );
+    }
+
+    // Body.
+    arRender.DrawCircle( mPose.mPosition, static_cast<int>( mRadius ), SKYBLUE );
+
+    // Heading indicator: a line from the centre to the edge, facing forward.
+    Vec2D HeadingEnd
+    {
+        mPose.mPosition.x + mRadius * std::cos( mPose.mHeading ),
+        mPose.mPosition.y + mRadius * std::sin( mPose.mHeading )
+    };
+    arRender.DrawLine( mPose.mPosition, HeadingEnd, HeadingLineThickness, BLACK );
+}
+
+
+//-----------------------------------------------------------------------------
+int CWallFollowerRobot::GetUpdateCount() const
+{
+    return mUpdateCount;
+}
+
+
+//-----------------------------------------------------------------------------
+int CWallFollowerRobot::GetCollisionCount() const
+{
+    return mCollisionCount;
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::SteerFromSensors()
+{
+    float LeftSpeed = mBaseSpeed;
+    float RightSpeed = mBaseSpeed;
+
+    if( mForwardReading < mCornerThreshold )
+    {
+        // A wall is closing in ahead-right: turn left to round the corner,
+        // overriding the side-distance control below. The closer the wall,
+        // the harder the turn.
+        float CornerError = mCornerThreshold - mForwardReading;
+        CornerError = std::min( CornerError, kMaxSteeringError );
+
+        LeftSpeed  -= mCornerGain * CornerError;
+        RightSpeed += mCornerGain * CornerError;
+    }
+    else
+    {
+        // Hold the side sensor at the target distance: too far away and we
+        // steer toward the wall, too close and we steer away from it.
+        float SideError = mSideReading - mTargetWallDistance;
+        SideError = std::max( -kMaxSteeringError, std::min( kMaxSteeringError, SideError ) );
+
+        LeftSpeed  += mSteeringGain * SideError;
+        RightSpeed -= mSteeringGain * SideError;
+    }
+
+    mDriveTrain.SetWheelSpeeds( LeftSpeed, RightSpeed );
+}
+
+
+//-----------------------------------------------------------------------------
+bool CWallFollowerRobot::HasCollided( const CPose& arTentativePose ) const
+{
+    return mrRoom.IsColliding( arTentativePose.mPosition, mRadius );
+}
+\end{lstlisting}
+
+\subsection*{A1: CWallFollowerRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.h
+//
+// A simulated disc-shaped robot that drives around a room, following the
+// wall on its right-hand side. It carries two range sensors (one aimed
+// directly right, one aimed forward-and-right) and a two-wheel differential
+// drive, and steers itself using only what those sensors report.
+//
+// The robot owns and drives itself: Update() reads its sensors, decides on
+// wheel speeds, advances its own pose by one fixed simulated time step, and
+// checks itself for collisions. Nothing outside the class needs to know how
+// any of that is done.
+//-----------------------------------------------------------------------------
+
+#ifndef CWALLFOLLOWERROBOT_H
+#define CWALLFOLLOWERROBOT_H
+
+#include "CRender.h"
+#include "CLoopReader.h"   // for CPose
+#include "CRangeSensor.h"
+#include "CDriveTrain.h"
+
+#include <vector>
+
+class CRoom;   // forward declaration: only used here by const reference
+
+//-----------------------------------------------------------------------------
+class CWallFollowerRobot
+{
+    public:
+        //---Ctor---
+        // arStartPose: where the robot begins.
+        // arRoom: the room this robot senses and collides against. The robot
+        // does not own the room, and keeps only a reference to it.
+        CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom );
+
+        //---Simulation---
+        // Advances the robot by one fixed simulated time step: sense, steer,
+        // move, and check for collisions.
+        void Update();
+
+        //---Rendering---
+        void Draw( CRender& arRender ) const;
+
+        //---Reporting---
+        int GetUpdateCount() const;
+        int GetCollisionCount() const;
+
+    private:
+        //---Internal behaviour, broken out of Update() for readability---
+        void SteerFromSensors();
+        bool HasCollided( const CPose& arTentativePose ) const;
+
+        //---Robot geometry and tuning, fixed for the life of the robot---
+        const float mRadius;               // body radius; fixed by the spec at 15
+        const float mAxleWidth;            // distance between the two wheels
+        const float mBaseSpeed;            // wheel speed when driving straight
+        const float mTimeStep;             // simulated seconds advanced per Update()
+        const float mMaxSensorRange;       // sensors report at most this far
+        const float mTargetWallDistance;   // desired distance from the side wall
+        const float mSteeringGain;         // proportional gain, side-distance control
+        const float mCornerThreshold;      // forward reading below this means "corner ahead"
+        const float mCornerGain;           // proportional gain, corner-avoidance control
+
+        //---State---
+        CPose mPose;
+        CDriveTrain mDriveTrain;
+        CRangeSensor mSideSensor;      // aimed 90 degrees right: directly to the side
+        CRangeSensor mForwardSensor;   // aimed 45 degrees right: forward-and-right
+
+        float mSideReading;
+        float mForwardReading;
+
+        std::vector<Vec2D> mTrail;
+
+        int mUpdateCount;
+        int mCollisionCount;
+        bool mWasColliding;   // so a collision is counted once on entry, not every
+                              // frame the robot remains pressed against the wall
+
+        const CRoom& mrRoom;   // the room this robot senses/collides against; not owned
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A1: main.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// main.cpp
+//
+// MTRX3760 Lab 2, A1: Wall Follower.
+//
+// Loads a room from a loop file (SimpleWalls.map by default) and simulates a
+// disc-shaped robot driving around it, following the wall on its right-hand
+// side. The simulation advances by a fixed simulated time step each frame; it
+// is not driven by real elapsed time. Close the window to end the run and
+// print the summary.
+//
+//
+// BUILDING, IF YOU INSTALLED RAYLIB WITH APT (on your own machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CRoom.cpp CRangeSensor.cpp CDriveTrain.cpp CWallFollowerRobot.cpp CLoopReader.cpp CRender.cpp -lraylib -o WallFollower
+//
+//
+// BUILDING, IF YOU BUILT RAYLIB FROM SOURCE (on a lab machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CRoom.cpp CRangeSensor.cpp CDriveTrain.cpp CWallFollowerRobot.cpp CLoopReader.cpp CRender.cpp -I$HOME/raylib/include -L$HOME/raylib/lib -lraylib -o WallFollower
+//
+//
+// RUNNING
+//
+//     ./WallFollower
+//     ./WallFollower SimpleWalls.map
+//-----------------------------------------------------------------------------
+
+#include "CRender.h"
+#include "CRoom.h"
+#include "CWallFollowerRobot.h"
+
+#include <iostream>
+#include <string>
+
+//-----------------------------------------------------------------------------
+int main( int argc, char* argv[] )
+{
+    std::string MapFilename = "SimpleWalls.map";
+    if( argc > 1 )
+    {
+        MapFilename = argv[1];
+    }
+
+    CRoom Room;
+    bool RoomLoaded = Room.LoadFromFile( MapFilename );
+
+    if( !RoomLoaded )
+    {
+        std::cout << "Could not load room from '" << MapFilename << "'" << std::endl;
+        return 1;
+    }
+
+    CRender Render;
+    CWallFollowerRobot Robot( Room.GetStartPose(), Room );
+
+    while( !Render.WindowShouldClose() )
+    {
+        Robot.Update();
+
+        Render.BeginDrawing();
+        Room.Draw( Render );
+        Robot.Draw( Render );
+        Render.EndDrawing();
+    }
+
+    Render.CloseWindow();
+
+    std::cout << "--- Run summary ---" << std::endl;
+    std::cout << "Updates completed: " << Robot.GetUpdateCount() << std::endl;
+    std::cout << "Total collisions:  " << Robot.GetCollisionCount() << std::endl;
+
+    return 0;
+}
+\end{lstlisting}
+
+% ===========================================================================
+% A2: Wall Follower + Line Follower. Files that are byte-for-byte identical
+% to their A1 listing above are not repeated here; see the note below.
+% ===========================================================================
+%--- A2 ---
+
+\subsection*{A2: files identical to A1}
+The following A2 files are byte-for-byte identical to the A1 listing above
+and are not reproduced a second time: \texttt{CDriveTrain.cpp}, \texttt{CDriveTrain.h},
+\texttt{CLoopReader.cpp}, \texttt{CLoopReader.h}, \texttt{CRangeSensor.h},
+\texttt{CRender.cpp}, \texttt{CRender.h}.
+
+\subsection*{A2: CFloorLine.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CFloorLine.cpp
+//
+// Both of these are one small step on top of CLoopShape: a point is on the
+// line when the nearest segment is within half the line's width, and drawing
+// the line is just drawing the shared segment loop in the line's own colour.
+//-----------------------------------------------------------------------------
+
+#include "CFloorLine.h"
+
+//---The spec fixes the line at 5 units wide for sensing. It is also drawn at
+//   that width, so the picture on screen matches what the sensors see.------
+const float CFloorLine::kLineWidth     = 5.0f;
+const float CFloorLine::kHalfWidth     = kLineWidth / 2.0f;
+const float CFloorLine::kDrawThickness = kLineWidth;
+
+//-----------------------------------------------------------------------------
+bool CFloorLine::IsLineUnder( Vec2D aPoint ) const
+{
+    return DistanceToNearestSegment( aPoint ) <= kHalfWidth;
+}
+
+
+//-----------------------------------------------------------------------------
+void CFloorLine::Draw( CRender& arRender ) const
+{
+    DrawSegments( arRender, kDrawThickness, ORANGE );
+}
+\end{lstlisting}
+
+\subsection*{A2: CFloorLine.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CFloorLine.h
+//
+// A CFloorLine is the line painted on the floor for the line-following robot
+// to follow: a closed loop of straight segments, read from a .map file. It is
+// a CLoopShape, and adds just two things on top - whether a given point sits
+// on the paint, and how the line is drawn.
+//
+// The spec fixes the line at 5 units wide for sensing purposes, so a point
+// counts as "on the line" when it is within half that width of a segment.
+//-----------------------------------------------------------------------------
+
+#ifndef CFLOORLINE_H
+#define CFLOORLINE_H
+
+#include "CLoopShape.h"
+#include "CRender.h"   // Vec2D, CRender
+
+//-----------------------------------------------------------------------------
+class CFloorLine : public CLoopShape
+{
+    public:
+        //---Sensing---
+        // True if aPoint sits on the painted line (within half the line's
+        // width of a segment).
+        bool IsLineUnder( Vec2D aPoint ) const;
+
+        //---Rendering---
+        // Draws the line in its own colour and width.
+        void Draw( CRender& arRender ) const override;
+
+    private:
+        static const float kLineWidth;      // how wide the painted line is, for sensing
+        static const float kHalfWidth;      // kLineWidth / 2: closer than this counts as "on the line"
+        static const float kDrawThickness;  // how wide the line is drawn on screen
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CLineFollowerRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineFollowerRobot.cpp
+//
+// The line-following half of the robot.
+//
+// Both sensors sit ahead of the robot's centre. mInnerSensor sits right on the
+// centre line, so it sees paint whenever the robot is tracking well.
+// mOuterSensor sits a little to the right of that, so it normally sees no
+// paint at all - it only sees paint once the line has drifted that far over.
+//
+// SteerFromSensors looks at what those two sensors last saw and picks one of
+// four moves: drive straight, turn right a little, turn right harder, or - if
+// neither sensor sees any paint at all - turn left to go looking for the line
+// again.
+//
+// Every turn happens at mTurnSpeed, well below the normal driving speed, so a
+// sharp corner is taken almost like a pivot on the spot. That keeps the robot
+// from ever running wide of the 5-unit-wide line. SimpleLine.map mostly turns
+// right, with one left-hand corner, so whenever the line is lost, it is
+// always somewhere to the left - which is why the "line lost" case always
+// turns left to look for it again.
+//-----------------------------------------------------------------------------
+
+#include "CLineFollowerRobot.h"
+
+//-----------------------------------------------------------------------------
+CLineFollowerRobot::CLineFollowerRobot( const CPose& arStartPose, const CRoom& arRoom, const CFloorLine& arLine )
+    :
+        CRobot( arStartPose, arRoom, LIME ),
+        mSensorForwardOffset( 20.0f ),
+        mSensorLateralOffset( 7.0f ),
+        mTurnSpeed( 50.0f ),
+        mSteerDelta( 40.0f ),
+        mHardSteerDelta( 60.0f ),
+        mInnerSensor( mSensorForwardOffset, 0.0f ),
+        mOuterSensor( mSensorForwardOffset, mSensorLateralOffset ),
+        mInnerOnLine( false ),
+        mOuterOnLine( false ),
+        mrLine( arLine )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+std::string CLineFollowerRobot::Name() const
+{
+    return "Line follower";
+}
+
+
+//-----------------------------------------------------------------------------
+void CLineFollowerRobot::Sense()
+{
+    mInnerOnLine = mInnerSensor.Sense( Pose(), mrLine );
+    mOuterOnLine = mOuterSensor.Sense( Pose(), mrLine );
+}
+
+
+//-----------------------------------------------------------------------------
+void CLineFollowerRobot::SteerFromSensors()
+{
+    const float Base = BaseSpeed();
+
+    float LeftSpeed = Base;
+    float RightSpeed = Base;
+
+    if( mInnerOnLine && !mOuterOnLine )
+    {
+        // Right on the line: drive straight at the normal speed.
+        LeftSpeed = Base;
+        RightSpeed = Base;
+    }
+    else if( mInnerOnLine && mOuterOnLine )
+    {
+        // The line has drifted right, into the outer sensor: slow the right
+        // wheel so the faster left wheel swings the robot back to the right,
+        // and slow both wheels down to turning speed.
+        LeftSpeed = mTurnSpeed;
+        RightSpeed = mTurnSpeed - mSteerDelta;
+    }
+    else if( mOuterOnLine )
+    {
+        // Only the outer sensor still sees the line: the same right turn as
+        // above, but harder, before the line disappears completely.
+        LeftSpeed = mTurnSpeed;
+        RightSpeed = mTurnSpeed - mHardSteerDelta;
+    }
+    else
+    {
+        // Neither sensor sees any paint: the line must now be to the left.
+        // Slow the left wheel so the faster right wheel swings the robot
+        // back around to the left.
+        LeftSpeed = mTurnSpeed - mSteerDelta;
+        RightSpeed = mTurnSpeed;
+    }
+
+    SetWheelSpeeds( LeftSpeed, RightSpeed );
+}
+\end{lstlisting}
+
+\subsection*{A2: CLineFollowerRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineFollowerRobot.h
+//
+// A CLineFollowerRobot is a CRobot that follows the floor line. It carries two
+// line sensors - one sitting over the line, one just beside it to the robot's
+// right - and writes the two functions CRobot needs: Sense() checks both
+// sensors, and SteerFromSensors() runs a simple on/off steering rule that
+// keeps the line just to the robot's right (see the .cpp for how).
+//
+// It still checks for wall collisions, the same as the wall follower, but
+// should end up with close to zero of them, since its line never touches a
+// wall.
+//-----------------------------------------------------------------------------
+
+#ifndef CLINEFOLLOWERROBOT_H
+#define CLINEFOLLOWERROBOT_H
+
+#include "CRobot.h"
+#include "CLineSensor.h"
+#include "CLoopReader.h"   // CPose
+
+#include <string>
+
+class CRoom;        // forward declaration: only used here by const reference
+class CFloorLine;   // forward declaration: only used here by const reference
+
+//-----------------------------------------------------------------------------
+class CLineFollowerRobot : public CRobot
+{
+    public:
+        //---Ctor---
+        // arRoom: shared with the wall follower, just for collision checks.
+        // arLine: the floor line this robot follows. Not owned.
+        CLineFollowerRobot( const CPose& arStartPose, const CRoom& arRoom, const CFloorLine& arLine );
+
+        //---Reporting---
+        std::string Name() const override;   // "Line follower"
+
+    protected:
+        //---The two functions CRobot needs a specific robot to write---
+        void Sense() override;              // checks both line sensors
+        void SteerFromSensors() override;   // decides the wheel speeds from what they found
+
+    private:
+        //---Sensor placement and steering settings, tuned for SimpleLine.map---
+        const float mSensorForwardOffset;   // how far ahead of the robot both sensors sit
+        const float mSensorLateralOffset;   // how far the "side" sensor sits to the right
+        const float mTurnSpeed;             // forward speed while correcting; slower than base speed,
+                                            //   so corners are turned almost on the spot
+        const float mSteerDelta;            // how much the wheel speeds differ for a normal turn
+        const float mHardSteerDelta;        // how much they differ when the line is almost lost
+
+        //---Sensors: one over the line, one beside it to the right---
+        CLineSensor mInnerSensor;
+        CLineSensor mOuterSensor;
+
+        //---What the sensors last saw, updated every time Sense() runs---
+        bool mInnerOnLine;
+        bool mOuterOnLine;
+
+        //---The line this robot follows; not owned---
+        const CFloorLine& mrLine;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CLineSensor.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineSensor.cpp
+//
+// Turns the sensor's mount position - which is measured relative to the robot
+// - into a point in the world, using the robot's current heading, then asks
+// the line whether that point is on the paint.
+//-----------------------------------------------------------------------------
+
+#include "CLineSensor.h"
+#include "CFloorLine.h"
+
+#include <cmath>
+
+//-----------------------------------------------------------------------------
+CLineSensor::CLineSensor( float aForwardOffset, float aLateralOffset )
+    :
+        mForwardOffset( aForwardOffset ),
+        mLateralOffset( aLateralOffset )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+bool CLineSensor::Sense( const CPose& arRobotPose, const CFloorLine& arLine ) const
+{
+    float CosHeading = std::cos( arRobotPose.mHeading );
+    float SinHeading = std::sin( arRobotPose.mHeading );
+
+    // Straight ahead is (cos, sin) of the heading. The robot's right is that
+    // direction turned 90 degrees clockwise, which is (-sin, cos).
+    Vec2D SamplePoint
+    {
+        arRobotPose.mPosition.x + mForwardOffset * CosHeading - mLateralOffset * SinHeading,
+        arRobotPose.mPosition.y + mForwardOffset * SinHeading + mLateralOffset * CosHeading
+    };
+
+    return arLine.IsLineUnder( SamplePoint );
+}
+\end{lstlisting}
+
+\subsection*{A2: CLineSensor.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineSensor.h
+//
+// A CLineSensor is a single downward-facing sensor, fixed to a robot at a set
+// spot relative to its centre. Given the robot's pose and the floor line, it
+// reports whether the floor right underneath it is line or not.
+//
+// It doesn't share anything with CRangeSensor on purpose. A CRangeSensor is
+// mounted at an angle and measures a distance; this one is mounted at a
+// position and just says yes or no. They only have the word "sensor" in
+// common.
+//-----------------------------------------------------------------------------
+
+#ifndef CLINESENSOR_H
+#define CLINESENSOR_H
+
+#include "CLoopReader.h"   // CPose
+
+class CFloorLine;   // forward declaration: only used here by const reference
+
+//-----------------------------------------------------------------------------
+class CLineSensor
+{
+    public:
+        //---Ctor---
+        // Where the sensor is mounted, relative to the robot:
+        //   aForwardOffset - how far ahead, along the way the robot faces
+        //   aLateralOffset - how far to the robot's right (90 degrees off that)
+        CLineSensor( float aForwardOffset, float aLateralOffset );
+
+        //---Sensing---
+        // True if the floor under the sensor is line, given the robot's pose.
+        bool Sense( const CPose& arRobotPose, const CFloorLine& arLine ) const;
+
+    private:
+        const float mForwardOffset;   // how far ahead of the robot the sensor sits
+        const float mLateralOffset;   // how far to the robot's right the sensor sits
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CLoopShape.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLoopShape.cpp
+//
+// LoadFromFile turns the vertices from the file into a closed chain of
+// segments. DistanceToNearestSegment and RangeAlongRay both check every
+// segment in turn and keep the best answer, using the two small geometry
+// helpers at the bottom of the file to do the actual maths. All of this used
+// to be part of CRoom in A1; it moved here so CFloorLine could use it too.
+//-----------------------------------------------------------------------------
+
+#include "CLoopShape.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+// There is nothing to set up yet: the file reader and the segment list start
+// out empty, and LoadFromFile fills them in later. Written here rather than
+// in the header, as usual.
+//-----------------------------------------------------------------------------
+CLoopShape::CLoopShape()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+CLoopShape::~CLoopShape()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Reads the file, checks it actually described a shape, and if so turns its
+// vertices into segments. Fails and leaves the old shape (if any) alone
+// otherwise.
+bool CLoopShape::LoadFromFile( const std::string& arFilename )
+{
+    bool Success = mLoopReader.ReadFile( arFilename );
+
+    if( Success && mLoopReader.GetVertices().empty() )
+    {
+        std::cout << "CLoopShape: '" << arFilename << "' contains no vertices" << std::endl;
+        Success = false;
+    }
+
+    if( Success )
+    {
+        BuildSegments( mLoopReader.GetVertices() );
+    }
+
+    return Success;
+}
+
+
+//-----------------------------------------------------------------------------
+void CLoopShape::BuildSegments( const std::vector<Vec2D>& arVertices )
+{
+    mSegments.clear();
+
+    // Close the loop: the last vertex joins back up to the first one.
+    Vec2D Previous = arVertices.back();
+    for( const Vec2D& Vertex : arVertices )
+    {
+        mSegments.push_back( CSegment{ Previous, Vertex } );
+        Previous = Vertex;
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+const CPose& CLoopShape::GetStartPose() const
+{
+    return mLoopReader.GetStartPose();
+}
+
+
+//-----------------------------------------------------------------------------
+// Checks every segment in turn and keeps whichever one comes out closest.
+// HaveNearest just means "is this the first segment we've checked", so the
+// very first distance found always gets kept as the starting best guess.
+float CLoopShape::DistanceToNearestSegment( Vec2D aPoint ) const
+{
+    bool HaveNearest = false;
+    float NearestDistance = 0.0f;
+
+    for( const CSegment& Segment : mSegments )
+    {
+        float Distance = DistancePointToSegment( aPoint, Segment );
+        if( !HaveNearest || Distance < NearestDistance )
+        {
+            NearestDistance = Distance;
+            HaveNearest = true;
+        }
+    }
+
+    return NearestDistance;
+}
+
+
+//-----------------------------------------------------------------------------
+// Checks every segment for where the ray crosses it, and keeps the closest
+// crossing found. Starting NearestDistance at aMaxRange means a ray that hits
+// nothing at all just reports aMaxRange, with no separate "nothing found" case
+// needed.
+float CLoopShape::RangeAlongRay( Vec2D aOrigin, float aAngle, float aMaxRange ) const
+{
+    Vec2D Direction{ std::cos( aAngle ), std::sin( aAngle ) };
+
+    float NearestDistance = aMaxRange;
+
+    for( const CSegment& Segment : mSegments )
+    {
+        float Distance = RayIntersectSegment( aOrigin, Direction, Segment );
+        if( Distance >= 0.0f && Distance < NearestDistance )
+        {
+            NearestDistance = Distance;
+        }
+    }
+
+    return NearestDistance;
+}
+
+
+//-----------------------------------------------------------------------------
+void CLoopShape::DrawSegments( CRender& arRender, float aThickness, Color aColour ) const
+{
+    for( const CSegment& Segment : mSegments )
+    {
+        arRender.DrawLine( Segment.mStart, Segment.mEnd, aThickness, aColour );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+// The shortest distance from aPoint to the segment. The point is allowed to
+// project anywhere along the segment's length, but that projection is clamped
+// to the two ends, so this measures against the real segment and not the
+// infinite line running through it.
+//-----------------------------------------------------------------------------
+float CLoopShape::DistancePointToSegment( Vec2D aPoint, const CSegment& arSegment )
+{
+    const float Epsilon = 1.0e-6f;
+
+    Vec2D SegmentVector{ arSegment.mEnd.x - arSegment.mStart.x, arSegment.mEnd.y - arSegment.mStart.y };
+    Vec2D StartToPoint{ aPoint.x - arSegment.mStart.x, aPoint.y - arSegment.mStart.y };
+
+    float SegmentLengthSquared = SegmentVector.x * SegmentVector.x + SegmentVector.y * SegmentVector.y;
+
+    // How far along the segment (0 at the start, 1 at the end) the point
+    // lands, clamped so the closest point stays on the segment itself.
+    float Projection = 0.0f;
+    if( SegmentLengthSquared > Epsilon )
+    {
+        Projection = ( StartToPoint.x * SegmentVector.x + StartToPoint.y * SegmentVector.y ) / SegmentLengthSquared;
+        Projection = std::max( 0.0f, std::min( 1.0f, Projection ) );
+    }
+
+    Vec2D ClosestPoint{
+        arSegment.mStart.x + Projection * SegmentVector.x,
+        arSegment.mStart.y + Projection * SegmentVector.y
+    };
+
+    Vec2D Delta{ aPoint.x - ClosestPoint.x, aPoint.y - ClosestPoint.y };
+
+    return std::sqrt( Delta.x * Delta.x + Delta.y * Delta.y );
+}
+
+
+//-----------------------------------------------------------------------------
+// Where the ray (aOrigin plus t times aDirection, for t >= 0) crosses the
+// segment. Returns -1 if it never does: the ray and segment run parallel, the
+// crossing point falls behind the ray's start, or it falls outside the
+// segment's two ends.
+//-----------------------------------------------------------------------------
+float CLoopShape::RayIntersectSegment( Vec2D aOrigin, Vec2D aDirection, const CSegment& arSegment )
+{
+    const float Epsilon = 1.0e-6f;
+    const float NoIntersection = -1.0f;   // returned when the ray misses the segment
+
+    Vec2D SegmentVector{ arSegment.mEnd.x - arSegment.mStart.x, arSegment.mEnd.y - arSegment.mStart.y };
+    Vec2D OriginToStart{ arSegment.mStart.x - aOrigin.x, arSegment.mStart.y - aOrigin.y };
+
+    // The 2D "cross product" of aDirection and SegmentVector.
+    float Denominator = aDirection.x * SegmentVector.y - aDirection.y * SegmentVector.x;
+
+    float Result = NoIntersection;
+
+    if( std::fabs( Denominator ) > Epsilon )
+    {
+        float RayDistance = ( OriginToStart.x * SegmentVector.y - OriginToStart.y * SegmentVector.x ) / Denominator;
+        float SegmentFraction = ( OriginToStart.x * aDirection.y - OriginToStart.y * aDirection.x ) / Denominator;
+
+        if( RayDistance >= 0.0f && SegmentFraction >= 0.0f && SegmentFraction <= 1.0f )
+        {
+            Result = RayDistance;
+        }
+    }
+
+    return Result;
+}
+\end{lstlisting}
+
+\subsection*{A2: CLoopShape.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLoopShape.h
+//
+// A CLoopShape is a closed loop made of straight segments, read in from a .map
+// file. It can answer two questions any robot might ask about a loop: how far
+// away is the nearest segment in a given direction, and how far away is the
+// nearest segment from a given point.
+//
+// CRoom (the walls) and CFloorLine (the floor line) are both loops of
+// segments, so they both inherit from CLoopShape. The only difference is what
+// each one means: a wall the robot bumps into, or a line the robot senses.
+// Draw() is left for each of them to fill in, so each can pick its own colour
+// and thickness.
+//-----------------------------------------------------------------------------
+
+#ifndef CLOOPSHAPE_H
+#define CLOOPSHAPE_H
+
+#include "CRender.h"       // Vec2D, Color, CRender
+#include "CLoopReader.h"   // CPose, CLoopReader
+
+#include <string>
+#include <vector>
+
+//-----------------------------------------------------------------------------
+class CLoopShape
+{
+    public:
+        //---Ctor/Dtor---
+        CLoopShape();
+        virtual ~CLoopShape();
+
+        //---Loading---
+        // Reads the loop file and builds the closed chain of segments (the
+        // last vertex joins back up to the first). Returns false if the file
+        // can't be opened or read, or if it has no vertices in it.
+        bool LoadFromFile( const std::string& arFilename );
+
+        //---Access---
+        const CPose& GetStartPose() const;   // the start pose read from the file
+
+        //---Geometry---
+        // The shortest distance from aPoint to any segment of the loop.
+        float DistanceToNearestSegment( Vec2D aPoint ) const;
+
+        // The distance from aOrigin, travelling along aAngle (in radians, 0
+        // pointing along +x, clockwise is positive), to the nearest segment
+        // it reaches - capped at aMaxRange if nothing is found sooner.
+        float RangeAlongRay( Vec2D aOrigin, float aAngle, float aMaxRange ) const;
+
+        //---Rendering---
+        // Draws the loop. Each kind of loop decides its own colour and width.
+        virtual void Draw( CRender& arRender ) const = 0;
+
+    protected:
+        // Draws every segment at one colour and thickness. A subclass calls
+        // this from its own Draw().
+        void DrawSegments( CRender& arRender, float aThickness, Color aColour ) const;
+
+    private:
+        //---One straight segment of the loop, from mStart to mEnd---
+        struct CSegment
+        {
+            Vec2D mStart;
+            Vec2D mEnd;
+        };
+
+        //---Turns the loop's vertices into the closed chain kept in mSegments---
+        void BuildSegments( const std::vector<Vec2D>& arVertices );
+
+        //---Small geometry helpers used by the two public functions above---
+        static float DistancePointToSegment( Vec2D aPoint, const CSegment& arSegment );
+        static float RayIntersectSegment( Vec2D aOrigin, Vec2D aDirection, const CSegment& arSegment );
+
+        CLoopReader mLoopReader;          // the file this shape was read from
+        std::vector<CSegment> mSegments;  // one segment for each edge of the loop
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CRangeSensor.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRangeSensor.cpp
+//-----------------------------------------------------------------------------
+
+#include "CRangeSensor.h"
+#include "CRoom.h"
+
+//-----------------------------------------------------------------------------
+CRangeSensor::CRangeSensor( float aMountAngle, float aMaxRange )
+    :
+        mMountAngle( aMountAngle ),
+        mMaxRange( aMaxRange )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+float CRangeSensor::Sense( const CPose& arRobotPose, const CRoom& arRoom ) const
+{
+    float WorldAngle = arRobotPose.mHeading + mMountAngle;
+
+    // RangeToWall was renamed RangeAlongRay when it moved to CLoopShape.
+    return arRoom.RangeAlongRay( arRobotPose.mPosition, WorldAngle, mMaxRange );
+}
+\end{lstlisting}
+
+\subsection*{A2: CRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRobot.cpp
+//
+// This is the same robot behaviour A1's CWallFollowerRobot used to have on its
+// own: moving one step, dealing with wall collisions (undo the move but keep
+// the new heading, and only count the hit once), remembering the trail, and
+// drawing it all. Sensing and steering are the only parts left for a specific
+// robot to write.
+//-----------------------------------------------------------------------------
+
+#include "CRobot.h"
+#include "CRoom.h"
+
+#include <cmath>
+#include <cstddef>
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+// Sets the robot's fixed measurements, places it at its start pose, and adds
+// that starting point as the first point of its trail.
+//-----------------------------------------------------------------------------
+CRobot::CRobot( const CPose& arStartPose, const CRoom& arRoom, Color aBodyColour )
+    :
+        mRadius( 15.0f ),
+        mAxleWidth( 26.0f ),
+        mBaseSpeed( 40.0f ),
+        mTimeStep( 0.05f ),
+        mPose( arStartPose ),
+        mDriveTrain( mAxleWidth ),
+        mBodyColour( aBodyColour ),
+        mUpdateCount( 0 ),
+        mCollisionCount( 0 ),
+        mWasColliding( false ),
+        mrRoom( arRoom )
+{
+    mTrail.push_back( mPose.mPosition );
+}
+
+
+//-----------------------------------------------------------------------------
+CRobot::~CRobot()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Runs the robot through one time step: check its sensors, decide on wheel
+// speeds, try to move, and deal with a wall if it hits one.
+void CRobot::Update()
+{
+    Sense();
+    SteerFromSensors();
+
+    CPose TentativePose = mDriveTrain.Advance( mPose, mTimeStep );
+
+    if( HasCollided( TentativePose ) )
+    {
+        // Undo the move, but keep the new heading, so steering still has a
+        // chance to turn the robot away from the wall on the next step.
+        mPose.mHeading = TentativePose.mHeading;
+
+        if( !mWasColliding )
+        {
+            ++mCollisionCount;
+            std::cout << Name() << " collision #" << mCollisionCount
+                      << " at update " << mUpdateCount << std::endl;
+        }
+        mWasColliding = true;
+    }
+    else
+    {
+        mPose = TentativePose;
+        mWasColliding = false;
+    }
+
+    mTrail.push_back( mPose.mPosition );
+    ++mUpdateCount;
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::Draw( CRender& arRender ) const
+{
+    const float TrailThickness = 1.5f;
+    const float HeadingLineThickness = 2.0f;
+
+    // The trail: a line joining each stored point to the next, in the
+    // robot's own colour so the two robots' trails can be told apart.
+    for( std::size_t i = 1; i < mTrail.size(); ++i )
+    {
+        arRender.DrawLine( mTrail[i - 1], mTrail[i], TrailThickness, mBodyColour );
+    }
+
+    // The body.
+    arRender.DrawCircle( mPose.mPosition, static_cast<int>( mRadius ), mBodyColour );
+
+    // A short line from the centre out to the edge, pointing the way the
+    // robot is facing.
+    Vec2D HeadingEnd
+    {
+        mPose.mPosition.x + mRadius * std::cos( mPose.mHeading ),
+        mPose.mPosition.y + mRadius * std::sin( mPose.mHeading )
+    };
+    arRender.DrawLine( mPose.mPosition, HeadingEnd, HeadingLineThickness, BLACK );
+}
+
+
+//-----------------------------------------------------------------------------
+int CRobot::GetUpdateCount() const
+{
+    return mUpdateCount;
+}
+
+
+//-----------------------------------------------------------------------------
+int CRobot::GetCollisionCount() const
+{
+    return mCollisionCount;
+}
+
+
+//-----------------------------------------------------------------------------
+const CPose& CRobot::Pose() const
+{
+    return mPose;
+}
+
+
+//-----------------------------------------------------------------------------
+const CRoom& CRobot::Room() const
+{
+    return mrRoom;
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::SetWheelSpeeds( float aLeft, float aRight )
+{
+    mDriveTrain.SetWheelSpeeds( aLeft, aRight );
+}
+
+
+//-----------------------------------------------------------------------------
+float CRobot::BaseSpeed() const
+{
+    return mBaseSpeed;
+}
+
+
+//-----------------------------------------------------------------------------
+bool CRobot::HasCollided( const CPose& arTentativePose ) const
+{
+    return mrRoom.IsColliding( arTentativePose.mPosition, mRadius );
+}
+\end{lstlisting}
+
+\subsection*{A2: CRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRobot.h
+//
+// A CRobot is the common part of every robot in the simulation. It keeps
+// track of where the robot is, drives its wheels, remembers its trail, and
+// counts how many steps it has taken and how many times it has hit a wall.
+//
+// It does not know how to sense the world or how to steer. Each specific kind
+// of robot - the wall follower, the line follower - fills in Sense() and
+// SteerFromSensors() to do that its own way. Everything else about running
+// the robot happens here, once, for both kinds.
+//-----------------------------------------------------------------------------
+
+#ifndef CROBOT_H
+#define CROBOT_H
+
+#include "CRender.h"       // CRender, Color, Vec2D
+#include "CLoopReader.h"   // CPose
+#include "CDriveTrain.h"
+
+#include <string>
+#include <vector>
+
+class CRoom;   // forward declaration: held by const reference, not owned
+
+//-----------------------------------------------------------------------------
+class CRobot
+{
+    public:
+        //---Ctor/Dtor---
+        // arStartPose:  where the robot begins.
+        // arRoom:  the room this robot checks for walls (and, for the wall
+        //   follower, senses against). Not owned, just a reference.
+        // aBodyColour:  the colour the robot's body and trail are drawn in.
+        CRobot( const CPose& arStartPose, const CRoom& arRoom, Color aBodyColour );
+        virtual ~CRobot();
+
+        //---Simulation---
+        void Update();   // moves the robot forward by one fixed time step
+
+        //---Rendering---
+        void Draw( CRender& arRender ) const;   // draws the trail, the body, and which way it's facing
+
+        //---Reporting---
+        int GetUpdateCount() const;             // how many steps the robot has taken
+        int GetCollisionCount() const;          // how many times it has hit a wall
+        virtual std::string Name() const = 0;   // the robot's name, e.g. "Wall follower"
+
+    protected:
+        //---Every specific robot has to write these two functions itself---
+        virtual void Sense() = 0;              // checks the robot's own sensors
+        virtual void SteerFromSensors() = 0;   // works out the wheel speeds from what the sensors found
+
+        //---The only parts a specific robot is allowed to touch. Everything
+        //   else stays private, so only CRobot itself can change it.---
+        const CPose& Pose() const;             // where the robot currently is
+        const CRoom& Room() const;             // the room its sensors check against
+        void SetWheelSpeeds( float aLeft, float aRight );   // the only way to change the wheel speeds
+        float BaseSpeed() const;               // the wheel speed used when driving straight
+
+    private:
+        //---True if the robot would be touching a wall at arTentativePose---
+        bool HasCollided( const CPose& arTentativePose ) const;
+
+        //---Fixed measurements and settings, the same for the robot's whole life---
+        const float mRadius;      // the robot's radius, fixed at 15 by the spec
+        const float mAxleWidth;   // the distance between the two wheels
+        const float mBaseSpeed;   // the wheel speed used when driving straight
+        const float mTimeStep;    // how many simulated seconds pass in one Update()
+
+        //---What changes as the robot runs---
+        CPose mPose;
+        CDriveTrain mDriveTrain;
+        Color mBodyColour;
+
+        std::vector<Vec2D> mTrail;   // one point per step; the ctor adds the very first one
+
+        int mUpdateCount;
+        int mCollisionCount;
+        bool mWasColliding;   // so a collision is only counted once when it starts,
+                              // not on every step the robot stays against the wall
+
+        const CRoom& mrRoom;   // the room this robot checks against; not owned
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CRoom.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRoom.cpp
+//
+// Implements CRoom. Both members are one line on top of CLoopShape: a
+// collision is "the nearest wall is closer than the robot's radius", and
+// drawing is the shared segment loop in the wall style.
+//-----------------------------------------------------------------------------
+
+#include "CRoom.h"
+
+//-----------------------------------------------------------------------------
+bool CRoom::IsColliding( Vec2D aPosition, float aRadius ) const
+{
+    return DistanceToNearestSegment( aPosition ) < aRadius;
+}
+
+
+//-----------------------------------------------------------------------------
+void CRoom::Draw( CRender& arRender ) const
+{
+    const float WallThickness = 2.0f;
+
+    DrawSegments( arRender, WallThickness, RAYWHITE );
+}
+\end{lstlisting}
+
+\subsection*{A2: CRoom.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRoom.h
+//
+// The room the robots drive in: a closed loop of straight walls, loaded from a
+// loop file. CRoom is a CLoopShape (a room is a closed loop of segments) and
+// adds only the wall-specific meaning on top of the shared geometry:
+//
+//   - "Am I touching a wall?" (IsColliding)
+//   - how a wall is drawn.
+//
+// Everything else - loading, the start pose, ray casts, point-distance queries
+// - comes from CLoopShape.
+//-----------------------------------------------------------------------------
+
+#ifndef CROOM_H
+#define CROOM_H
+
+#include "CLoopShape.h"
+#include "CRender.h"   // Vec2D, CRender
+
+//-----------------------------------------------------------------------------
+class CRoom : public CLoopShape
+{
+    public:
+        //---Collision---
+        // True if a disc of radius aRadius centred at aPosition overlaps any
+        // wall of the room.
+        bool IsColliding( Vec2D aPosition, float aRadius ) const;
+
+        //---Rendering---
+        void Draw( CRender& arRender ) const override;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CSimulation.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CSimulation.cpp
+//
+// LoadMaps loads the room, then the line, and only builds the two robots once
+// both have loaded successfully. Run is the same fixed-step loop A1's main()
+// used to run, just moved in here, now walking a list of robots and drawing
+// the line as well as the room.
+//-----------------------------------------------------------------------------
+
+#include "CSimulation.h"
+#include "CRender.h"
+#include "CWallFollowerRobot.h"
+#include "CLineFollowerRobot.h"
+
+#include <iostream>
+
+//-----------------------------------------------------------------------------
+// Nothing needs setting up yet - the room, the line and the robot list all
+// start out empty, and the maps are loaded afterwards, in LoadMaps().
+//-----------------------------------------------------------------------------
+CSimulation::CSimulation()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Loads the room, then the line, stopping early if either one fails. Only
+// once both are in place does it build the two robots, since each robot needs
+// a start pose that comes from its own map.
+bool CSimulation::LoadMaps( const std::string& arWallsMap, const std::string& arLineMap )
+{
+    bool Loaded = mRoom.LoadFromFile( arWallsMap );
+
+    if( Loaded )
+    {
+        Loaded = mLine.LoadFromFile( arLineMap );
+    }
+
+    if( Loaded )
+    {
+        mRobots.clear();
+        mRobots.push_back( std::make_unique<CWallFollowerRobot>( mRoom.GetStartPose(), mRoom ) );
+        mRobots.push_back( std::make_unique<CLineFollowerRobot>( mLine.GetStartPose(), mRoom, mLine ) );
+    }
+
+    return Loaded;
+}
+
+
+//-----------------------------------------------------------------------------
+// Keeps stepping and redrawing every robot for as long as the window stays
+// open, then prints the summary once the window is closed.
+void CSimulation::Run( CRender& arRender )
+{
+    while( !arRender.WindowShouldClose() )
+    {
+        UpdateRobots();
+
+        arRender.BeginDrawing();
+        DrawFrame( arRender );
+        arRender.EndDrawing();
+    }
+
+    arRender.CloseWindow();
+    PrintSummary();
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::UpdateRobots()
+{
+    for( const std::unique_ptr<CRobot>& rRobot : mRobots )
+    {
+        rRobot->Update();
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::DrawFrame( CRender& arRender ) const
+{
+    mRoom.Draw( arRender );
+    mLine.Draw( arRender );
+
+    for( const std::unique_ptr<CRobot>& rRobot : mRobots )
+    {
+        rRobot->Draw( arRender );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::PrintSummary() const
+{
+    std::cout << "--- Run summary ---" << std::endl;
+
+    for( const std::unique_ptr<CRobot>& rRobot : mRobots )
+    {
+        std::cout << rRobot->Name()
+                  << ": updates completed " << rRobot->GetUpdateCount()
+                  << ", total collisions " << rRobot->GetCollisionCount() << std::endl;
+    }
+}
+\end{lstlisting}
+
+\subsection*{A2: CSimulation.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CSimulation.h
+//
+// A CSimulation owns the whole simulated world: the room, the floor line, and
+// both robots. It runs the fixed-timestep loop that updates and draws them.
+// main() just needs to build one of these, load the maps, and call Run().
+//
+// The robots are kept as CRobot pointers because they can only be built once
+// the maps have loaded (each one needs a start pose from its map), and having
+// them in one list means Update(), Draw() and the summary can all just walk
+// over both robots the same way.
+//-----------------------------------------------------------------------------
+
+#ifndef CSIMULATION_H
+#define CSIMULATION_H
+
+#include "CRoom.h"
+#include "CFloorLine.h"
+#include "CRobot.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+class CRender;   // forward declaration: Run() takes it by reference only
+
+//-----------------------------------------------------------------------------
+class CSimulation
+{
+    public:
+        //---Ctor---
+        CSimulation();
+
+        //---Setup---
+        // Loads both maps and, if they both load, builds the two robots.
+        // Returns false, and prints a message, if either map fails to load.
+        bool LoadMaps( const std::string& arWallsMap, const std::string& arLineMap );
+
+        //---Run---
+        // Updates and draws every robot until the window is closed, then
+        // prints a short summary for each robot to the console.
+        void Run( CRender& arRender );
+
+    private:
+        //---One frame of the run, broken out of Run() to keep it short---
+        void UpdateRobots();                         // moves every robot forward one step
+        void DrawFrame( CRender& arRender ) const;   // draws the room, the line, then the robots
+        void PrintSummary() const;                   // prints one line per robot
+
+        CRoom mRoom;
+        CFloorLine mLine;
+        std::vector<std::unique_ptr<CRobot>> mRobots;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: CWallFollowerRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.cpp
+//
+// The wall-specific half of the robot. The steering law is unchanged from A1:
+// a two-mode proportional controller on the two wheel speeds around a base
+// speed.
+//
+//   - Corner mode: if the 45-degree forward-right sensor reads below
+//     mCornerThreshold, a wall is closing in ahead; steer left, harder the
+//     closer it is.
+//   - Wall-hold mode: otherwise hold the 90-degree side sensor at
+//     mTargetWallDistance; too far steers toward the wall, too close away.
+//
+// The steering error is clamped so a lost reading (max range) cannot demand a
+// violent turn.
+//-----------------------------------------------------------------------------
+
+#include "CWallFollowerRobot.h"
+#include "CRoom.h"
+
+#include <algorithm>
+#include <cmath>
+
+//---Fixed by the assignment spec: two sensors, aimed 90 and 45 degrees right---
+static const float kPi = 3.14159265358979323846f;
+static const float kSideSensorAngle    = kPi / 2.0f;   // 90 degrees
+static const float kForwardSensorAngle = kPi / 4.0f;   // 45 degrees
+
+//---Steering error is clamped to this magnitude before scaling by a gain---
+static const float kMaxSteeringError = 100.0f;
+
+
+//-----------------------------------------------------------------------------
+CWallFollowerRobot::CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom )
+    :
+        CRobot( arStartPose, arRoom, SKYBLUE ),
+        mMaxSensorRange( 300.0f ),
+        mTargetWallDistance( 60.0f ),
+        mSteeringGain( 0.9f ),
+        mCornerThreshold( 70.0f ),
+        mCornerGain( 1.4f ),
+        mSideSensor( kSideSensorAngle, mMaxSensorRange ),
+        mForwardSensor( kForwardSensorAngle, mMaxSensorRange ),
+        mSideReading( mMaxSensorRange ),
+        mForwardReading( mMaxSensorRange )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+std::string CWallFollowerRobot::Name() const
+{
+    return "Wall follower";
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::Sense()
+{
+    mSideReading    = mSideSensor.Sense( Pose(), Room() );
+    mForwardReading = mForwardSensor.Sense( Pose(), Room() );
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::SteerFromSensors()
+{
+    float LeftSpeed = BaseSpeed();
+    float RightSpeed = BaseSpeed();
+
+    if( mForwardReading < mCornerThreshold )
+    {
+        // A wall is closing in ahead-right: turn left to round the corner,
+        // overriding the side-distance control below. The closer the wall,
+        // the harder the turn.
+        float CornerError = mCornerThreshold - mForwardReading;
+        CornerError = std::min( CornerError, kMaxSteeringError );
+
+        LeftSpeed  -= mCornerGain * CornerError;
+        RightSpeed += mCornerGain * CornerError;
+    }
+    else
+    {
+        // Hold the side sensor at the target distance: too far away and we
+        // steer toward the wall, too close and we steer away from it.
+        float SideError = mSideReading - mTargetWallDistance;
+        SideError = std::max( -kMaxSteeringError, std::min( kMaxSteeringError, SideError ) );
+
+        LeftSpeed  += mSteeringGain * SideError;
+        RightSpeed -= mSteeringGain * SideError;
+    }
+
+    SetWheelSpeeds( LeftSpeed, RightSpeed );
+}
+\end{lstlisting}
+
+\subsection*{A2: CWallFollowerRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.h
+//
+// A CRobot that follows the wall on its right-hand side. It carries the two
+// range sensors the spec fixes (one aimed 90 degrees right, one 45 degrees
+// forward-right) and supplies the two CRobot hooks:
+//
+//   Sense()            - read both range sensors against the room
+//   SteerFromSensors() - a two-mode proportional controller (see the .cpp)
+//
+// All the machinery it used to have in A1 - pose, drive train, trail,
+// collision handling, counters, Update(), Draw() - now lives in CRobot.
+//-----------------------------------------------------------------------------
+
+#ifndef CWALLFOLLOWERROBOT_H
+#define CWALLFOLLOWERROBOT_H
+
+#include "CRobot.h"
+#include "CRangeSensor.h"
+#include "CLoopReader.h"   // CPose
+
+#include <string>
+
+class CRoom;   // forward declaration: only used here by const reference
+
+//-----------------------------------------------------------------------------
+class CWallFollowerRobot : public CRobot
+{
+    public:
+        //---Ctor---
+        CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom );
+
+        //---Reporting---
+        std::string Name() const override;
+
+    protected:
+        //---CRobot hooks---
+        void Sense() override;
+        void SteerFromSensors() override;
+
+    private:
+        //---Tuning, fixed for the life of the robot---
+        const float mMaxSensorRange;       // sensors report at most this far
+        const float mTargetWallDistance;   // desired distance from the side wall
+        const float mSteeringGain;         // proportional gain, side-distance control
+        const float mCornerThreshold;      // forward reading below this means "corner ahead"
+        const float mCornerGain;           // proportional gain, corner-avoidance control
+
+        //---Sensors: 90 degrees right, and 45 degrees forward-right---
+        CRangeSensor mSideSensor;
+        CRangeSensor mForwardSensor;
+
+        //---Most recent readings, refreshed by Sense()---
+        float mSideReading;
+        float mForwardReading;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A2: main.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// main.cpp
+//
+// MTRX3760 Lab 2, A2: Wall Follower + Line Follower.
+//
+// Builds a CSimulation, loads the two map files (SimpleWalls.map and
+// SimpleLine.map by default), and runs the fixed-timestep loop until the
+// window is closed. Both robots run side by side and never interact.
+// Close the window to end the run and print the summary for each robot.
+//
+//
+// BUILDING, IF YOU INSTALLED RAYLIB WITH APT (on your own machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp CRangeSensor.cpp CLineSensor.cpp CDriveTrain.cpp CRobot.cpp CWallFollowerRobot.cpp CLineFollowerRobot.cpp CLoopReader.cpp CRender.cpp -lraylib -o WallFollower
+//
+//
+// BUILDING, IF YOU BUILT RAYLIB FROM SOURCE (on a lab machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp CRangeSensor.cpp CLineSensor.cpp CDriveTrain.cpp CRobot.cpp CWallFollowerRobot.cpp CLineFollowerRobot.cpp CLoopReader.cpp CRender.cpp -I$HOME/raylib/include -L$HOME/raylib/lib -lraylib -o WallFollower
+//
+//
+// RUNNING
+//
+//     ./WallFollower
+//     ./WallFollower SimpleWalls.map SimpleLine.map
+//-----------------------------------------------------------------------------
+
+#include "CRender.h"
+#include "CSimulation.h"
+
+#include <iostream>
+#include <string>
+
+//-----------------------------------------------------------------------------
+// Reads the map filenames off the command line, falling back to the two
+// defaults if none were given, then builds and runs the simulation.
+int main( int argc, char* argv[] )
+{
+    int ExitCode = 0;
+
+    std::string WallsMapFilename = "SimpleWalls.map";
+    std::string LineMapFilename = "SimpleLine.map";
+
+    if( argc > 1 )
+    {
+        WallsMapFilename = argv[1];
+    }
+    if( argc > 2 )
+    {
+        LineMapFilename = argv[2];
+    }
+
+    CSimulation Simulation;
+
+    if( !Simulation.LoadMaps( WallsMapFilename, LineMapFilename ) )
+    {
+        std::cout << "Could not load maps ('" << WallsMapFilename
+                  << "', '" << LineMapFilename << "')" << std::endl;
+        ExitCode = 1;
+    }
+    else
+    {
+        CRender Render;
+        Simulation.Run( Render );
+    }
+
+    return ExitCode;
+}
+\end{lstlisting}
+
+% ===========================================================================
+% A5: Noise Bonus -- a standalone copy of A2, augmented with randomness.
+% Only the files that differ from A2 are shown here; see the note below.
+% ===========================================================================
+%--- A5 ---
+
+\subsection*{A5: files identical to A2}
+The following A5 files are byte-for-byte identical to A2's copy and are not
+reproduced a second time. Most are printed in full under A2, above:
+\texttt{CFloorLine.cpp}, \texttt{CFloorLine.h}, \texttt{CLineSensor.cpp},
+\texttt{CLineSensor.h}, \texttt{CLoopShape.cpp}, \texttt{CLoopShape.h},
+\texttt{CRangeSensor.cpp}, \texttt{CRoom.cpp}, \texttt{CRoom.h}.
+Three of them are identical all the way back to A1 as well, and A2 skipped
+them too, so they are printed only under A1, above: \texttt{CLoopReader.cpp},
+\texttt{CLoopReader.h}, \texttt{CRangeSensor.h}.
+
+\subsection*{A5: CDriveTrain.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CDriveTrain.cpp
+//-----------------------------------------------------------------------------
+
+#include "CDriveTrain.h"
+#include "CNoiseSource.h"
+
+#include <cmath>
+
+//-----------------------------------------------------------------------------
+CDriveTrain::CDriveTrain( float aAxleWidth, CNoiseSource& arNoise )
+    :
+        mAxleWidth( aAxleWidth ),
+        mLeftSpeed( 0.0f ),
+        mRightSpeed( 0.0f ),
+        mrNoise( arNoise )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+void CDriveTrain::SetWheelSpeeds( float aLeftSpeed, float aRightSpeed )
+{
+    mLeftSpeed = aLeftSpeed;
+    mRightSpeed = aRightSpeed;
+}
+
+
+//-----------------------------------------------------------------------------
+CPose CDriveTrain::Advance( const CPose& arPose, float aTimeStep )
+{
+    // Working in distance travelled per wheel, rather than speed, lets the
+    // random slip be added to each wheel separately before they're combined.
+    float LeftDistance = mrNoise.AddWheelSlip( mLeftSpeed * aTimeStep );
+    float RightDistance = mrNoise.AddWheelSlip( mRightSpeed * aTimeStep );
+
+    float ForwardDistance = 0.5f * ( LeftDistance + RightDistance );
+    float HeadingChange = ( LeftDistance - RightDistance ) / mAxleWidth;
+
+    CPose NewPose = arPose;
+
+    NewPose.mPosition.x += ForwardDistance * std::cos( arPose.mHeading );
+    NewPose.mPosition.y += ForwardDistance * std::sin( arPose.mHeading );
+    NewPose.mHeading    += HeadingChange;
+
+    return NewPose;
+}
+\end{lstlisting}
+
+\subsection*{A5: CDriveTrain.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CDriveTrain.h
+//
+// A two-wheeled differential drive train. It knows nothing about sensing or
+// control strategy: it is simply told a speed for each wheel, and can then
+// advance a given pose by one fixed time step according to those speeds.
+//
+// Coordinates follow the convention used throughout this project: x right,
+// y down, heading in radians measured clockwise from +x. With that
+// convention, driving the left wheel faster than the right turns the robot
+// anticlockwise (heading decreases); driving the right wheel faster turns it
+// clockwise (heading increases).
+//
+// For this noise bonus, it also holds the shared CNoiseSource, and Advance()
+// uses it to add a small random slip to each wheel's travel. This is the only
+// place in the whole program where the wheel noise comes in.
+//-----------------------------------------------------------------------------
+
+#ifndef CDRIVETRAIN_H
+#define CDRIVETRAIN_H
+
+#include "CLoopReader.h"   // for CPose
+
+class CNoiseSource;   // shared with every drive train, so just a reference here
+
+//-----------------------------------------------------------------------------
+class CDriveTrain
+{
+    public:
+        //---Ctor---
+        CDriveTrain( float aAxleWidth, CNoiseSource& arNoise );
+
+        //---Control---
+        void SetWheelSpeeds( float aLeftSpeed, float aRightSpeed );
+
+        //---Simulation---
+        // Returns the pose reached by starting at arPose and driving at the
+        // current wheel speeds for aTimeStep seconds, with a small random
+        // slip added to each wheel along the way. Does not change arPose.
+        CPose Advance( const CPose& arPose, float aTimeStep );
+
+    private:
+        const float mAxleWidth;
+
+        float mLeftSpeed;
+        float mRightSpeed;
+
+        CNoiseSource& mrNoise;   // shared with every drive train; not owned
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CLineFollowerRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineFollowerRobot.cpp
+//
+// The line-following half of the robot.
+//
+// Both sensors sit ahead of the robot's centre. mInnerSensor sits right on the
+// centre line, so it sees paint whenever the robot is tracking well.
+// mOuterSensor sits a little to the right of that, so it normally sees no
+// paint at all - it only sees paint once the line has drifted that far over.
+//
+// SteerFromSensors looks at what those two sensors last saw and picks one of
+// four moves: drive straight, turn right a little, turn right harder, or - if
+// neither sensor sees any paint at all - turn left to go looking for the line
+// again.
+//
+// Every turn happens at mTurnSpeed, well below the normal driving speed, so a
+// sharp corner is taken almost like a pivot on the spot. That keeps the robot
+// from ever running wide of the 5-unit-wide line. SimpleLine.map mostly turns
+// right, with one left-hand corner, so whenever the line is lost, it is
+// always somewhere to the left - which is why the "line lost" case always
+// turns left to look for it again.
+//
+// None of this steering changes for the noise bonus. The "line lost" turn is
+// what carries a robot through the noise: if a random nudge pushes it clear of
+// the line, this same turn circles it back onto the line, and from there it
+// tracks as normal. The wheel slip added each step is much smaller than one
+// of these turns, so it just shows up as a little wobble along the line
+// rather than as a genuinely lost line.
+//-----------------------------------------------------------------------------
+
+#include "CLineFollowerRobot.h"
+
+const Color CLineFollowerRobot::kFamilyColour = LIME;
+
+
+//-----------------------------------------------------------------------------
+CLineFollowerRobot::CLineFollowerRobot( const CPose& arStartPose, const CRoom& arRoom, const CFloorLine& arLine,
+                                        CNoiseSource& arNoise, float aShadeFraction )
+    :
+        CRobot( arStartPose, arRoom, arNoise,
+                CRender::Lighten( kFamilyColour, aShadeFraction ) ),
+        mSensorForwardOffset( 20.0f ),
+        mSensorLateralOffset( 7.0f ),
+        mTurnSpeed( 50.0f ),
+        mSteerDelta( 40.0f ),
+        mHardSteerDelta( 60.0f ),
+        mInnerSensor( mSensorForwardOffset, 0.0f ),
+        mOuterSensor( mSensorForwardOffset, mSensorLateralOffset ),
+        mInnerOnLine( false ),
+        mOuterOnLine( false ),
+        mrLine( arLine )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+std::string CLineFollowerRobot::Name() const
+{
+    return "Line follower";
+}
+
+
+//-----------------------------------------------------------------------------
+void CLineFollowerRobot::Sense()
+{
+    mInnerOnLine = mInnerSensor.Sense( Pose(), mrLine );
+    mOuterOnLine = mOuterSensor.Sense( Pose(), mrLine );
+}
+
+
+//-----------------------------------------------------------------------------
+void CLineFollowerRobot::SteerFromSensors()
+{
+    const float Base = BaseSpeed();
+
+    float LeftSpeed = Base;
+    float RightSpeed = Base;
+
+    if( mInnerOnLine && !mOuterOnLine )
+    {
+        // Right on the line: drive straight at the normal speed.
+        LeftSpeed = Base;
+        RightSpeed = Base;
+    }
+    else if( mInnerOnLine && mOuterOnLine )
+    {
+        // The line has drifted right, into the outer sensor: slow the right
+        // wheel so the faster left wheel swings the robot back to the right,
+        // and slow both wheels down to turning speed.
+        LeftSpeed = mTurnSpeed;
+        RightSpeed = mTurnSpeed - mSteerDelta;
+    }
+    else if( mOuterOnLine )
+    {
+        // Only the outer sensor still sees the line: the same right turn as
+        // above, but harder, before the line disappears completely.
+        LeftSpeed = mTurnSpeed;
+        RightSpeed = mTurnSpeed - mHardSteerDelta;
+    }
+    else
+    {
+        // Neither sensor sees any paint: the line must now be to the left.
+        // Slow the left wheel so the faster right wheel swings the robot
+        // back around to the left.
+        LeftSpeed = mTurnSpeed - mSteerDelta;
+        RightSpeed = mTurnSpeed;
+    }
+
+    SetWheelSpeeds( LeftSpeed, RightSpeed );
+}
+\end{lstlisting}
+
+\subsection*{A5: CLineFollowerRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CLineFollowerRobot.h
+//
+// A CLineFollowerRobot is a CRobot that follows the floor line. It carries two
+// line sensors - one sitting over the line, one just beside it to the robot's
+// right - and writes the two functions CRobot needs: Sense() checks both
+// sensors, and SteerFromSensors() runs a simple on/off steering rule that
+// keeps the line just to the robot's right (see the .cpp for how).
+//
+// It still checks for wall collisions, the same as the wall follower, but
+// should end up with close to zero of them, since its line never touches a
+// wall.
+//-----------------------------------------------------------------------------
+
+#ifndef CLINEFOLLOWERROBOT_H
+#define CLINEFOLLOWERROBOT_H
+
+#include "CRobot.h"
+#include "CLineSensor.h"
+#include "CLoopReader.h"   // CPose
+
+#include <string>
+
+class CRoom;          // forward declaration: only used here by const reference
+class CFloorLine;     // forward declaration: only used here by const reference
+class CNoiseSource;   // forward declaration: only used here by reference
+
+//-----------------------------------------------------------------------------
+class CLineFollowerRobot : public CRobot
+{
+    public:
+        //---Ctor---
+        // arRoom: shared with the wall follower, just for collision checks.
+        // arLine: the floor line this robot follows. Not owned.
+        // arNoise: the shared noise source, passed on to the drive train.
+        // aShadeFraction: where this robot sits in its group of twenty, from
+        //   0 to 1. It decides how much lighter the body colour is, so the
+        //   twenty line followers can be told apart on screen.
+        CLineFollowerRobot( const CPose& arStartPose, const CRoom& arRoom, const CFloorLine& arLine,
+                            CNoiseSource& arNoise, float aShadeFraction );
+
+        //---Reporting---
+        std::string Name() const override;   // "Line follower"
+
+    protected:
+        //---The two functions CRobot needs a specific robot to write---
+        void Sense() override;              // checks both line sensors
+        void SteerFromSensors() override;   // decides the wheel speeds from what they found
+
+    private:
+        //---The colour every line follower is a lighter shade of---
+        static const Color kFamilyColour;
+
+        //---Sensor placement and steering settings, tuned for SimpleLine.map---
+        const float mSensorForwardOffset;   // how far ahead of the robot both sensors sit
+        const float mSensorLateralOffset;   // how far the "side" sensor sits to the right
+        const float mTurnSpeed;             // forward speed while correcting; slower than base speed,
+                                            //   so corners are turned almost on the spot
+        const float mSteerDelta;            // how much the wheel speeds differ for a normal turn
+        const float mHardSteerDelta;        // how much they differ when the line is almost lost
+
+        //---Sensors: one over the line, one beside it to the right---
+        CLineSensor mInnerSensor;
+        CLineSensor mOuterSensor;
+
+        //---What the sensors last saw, updated every time Sense() runs---
+        bool mInnerOnLine;
+        bool mOuterOnLine;
+
+        //---The line this robot follows; not owned---
+        const CFloorLine& mrLine;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CNoiseSource.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CNoiseSource.cpp
+//
+// Every noise function here is just one call to RandomUnit(), scaled by
+// whichever of the three sizes below applies. Those three sizes are really
+// the only decisions being made in this file.
+//-----------------------------------------------------------------------------
+
+#include "CNoiseSource.h"
+
+#include <cstdlib>
+#include <iostream>
+
+//---A robot has radius 15, and its wheels move about 2 units per step at
+//   normal driving speed. The three sizes below were picked against those
+//   two numbers:
+//
+//   - 4 units of start shift is roughly a quarter of a robot's radius. That's
+//     enough to spread twenty robots out that would otherwise all start on
+//     the same spot, but not so much that a line follower starts off the line.
+//   - 0.1 radians is a bit under 6 degrees of starting heading error.
+//   - 0.3 units of wheel slip is about 15% of one step. Each wheel slips on
+//     its own, so the heading wanders a little every step - but only a
+//     little, far less than a correction can undo, so a robot always finds
+//     its way back and no two robots end up tracing the same path.----------
+const float CNoiseSource::kStartMoveNoise = 4.0f;
+const float CNoiseSource::kStartTurnNoise = 0.10f;
+const float CNoiseSource::kWheelStepNoise = 0.30f;
+
+
+//-----------------------------------------------------------------------------
+// Seeds rand() so this run draws whichever sequence of numbers aSeed picks
+// out. There's nothing else to set up.
+//-----------------------------------------------------------------------------
+CNoiseSource::CNoiseSource( unsigned int aSeed )
+    :
+        mSeed( aSeed )
+{
+    std::srand( aSeed );
+}
+
+
+//-----------------------------------------------------------------------------
+CPose CNoiseSource::ScatterStartPose( const CPose& aIdealPose )
+{
+    CPose Result = aIdealPose;
+
+    // x, y and heading each get their own random number, so this really does
+    // scatter the robots instead of shoving them all the same way.
+    Result.mPosition.x += kStartMoveNoise * RandomUnit();
+    Result.mPosition.y += kStartMoveNoise * RandomUnit();
+    Result.mHeading    += kStartTurnNoise * RandomUnit();
+
+    return Result;
+}
+
+
+//-----------------------------------------------------------------------------
+float CNoiseSource::AddWheelSlip( float aIdealStep )
+{
+    return aIdealStep + kWheelStepNoise * RandomUnit();
+}
+
+
+//-----------------------------------------------------------------------------
+void CNoiseSource::PrintNoiseLevels() const
+{
+    const float RadiansToDegrees = 57.2957795f;
+
+    std::cout << "Noise: seed " << mSeed
+              << ", start move +/-" << kStartMoveNoise << " units"
+              << ", start turn +/-" << kStartTurnNoise * RadiansToDegrees << " degrees"
+              << ", wheel slip +/-" << kWheelStepNoise << " units per step"
+              << std::endl;
+}
+
+
+//-----------------------------------------------------------------------------
+// rand() gives back a whole number from 0 to RAND_MAX. Dividing that range
+// down to 0..1, doubling it, and subtracting 1 turns it into a number
+// spread evenly between -1 and 1.
+//-----------------------------------------------------------------------------
+float CNoiseSource::RandomUnit()
+{
+    float ZeroToOne = static_cast<float>( std::rand() ) / static_cast<float>( RAND_MAX );
+
+    return 2.0f * ZeroToOne - 1.0f;
+}
+\end{lstlisting}
+
+\subsection*{A5: CNoiseSource.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CNoiseSource.h
+//
+// A CNoiseSource is the one thing in the whole program that generates random
+// numbers. It knows how big the two kinds of noise this bonus needs should be,
+// and hands them out through two functions: one shifts a robot's start pose by
+// a small random amount, and the other adds a small random slip to how far a
+// wheel actually turns in a step.
+//
+// It's built on rand() and srand() from <cstdlib>. rand() shares one stream
+// across the whole program rather than each object getting its own, but that's
+// fine here because the program only ever makes one CNoiseSource.
+//
+// One CNoiseSource is made in CSimulation and shared by every robot, so the
+// whole run comes from a single seeded sequence and can be run again exactly.
+//-----------------------------------------------------------------------------
+
+#ifndef CNOISESOURCE_H
+#define CNOISESOURCE_H
+
+#include "CLoopReader.h"   // CPose
+
+//-----------------------------------------------------------------------------
+class CNoiseSource
+{
+    public:
+        //---Ctor---
+        // aSeed picks the random sequence, via srand(). The same seed always
+        // gives the same run, which is how the report screenshot can be
+        // reproduced later.
+        explicit CNoiseSource( unsigned int aSeed );
+
+        //---Noise---
+        // Returns aIdealPose nudged by a small random amount in x, y and
+        // heading, so each robot starts from a slightly different place.
+        CPose ScatterStartPose( const CPose& aIdealPose );
+
+        // Returns aIdealStep - the distance a wheel was told to move this step
+        // - with a small random slip added on, so the two wheels never move by
+        // exactly the amount they were asked to.
+        float AddWheelSlip( float aIdealStep );
+
+        //---Reporting---
+        // Prints the seed and the three noise amounts, so a screenshot can be
+        // matched back to the run that produced it.
+        void PrintNoiseLevels() const;
+
+    private:
+        //---A random number between -1 and 1, spread evenly, from rand()---
+        float RandomUnit();
+
+        //---How big each kind of noise is. Chosen against a robot of radius 15
+        //   whose wheels move about 2 units per step at normal driving speed.---
+        static const float kStartMoveNoise;   // how far the start point can shift, in units
+        static const float kStartTurnNoise;   // how far the start heading can shift, in radians
+        static const float kWheelStepNoise;   // how much a wheel's step can vary, in units
+
+        //---Kept only so PrintNoiseLevels can say which run this was---
+        const unsigned int mSeed;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CRender.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRender.cpp
+//
+// Implementation of the raylib wrapper. The :: prefix on the raylib calls says
+// "the global one", distinguishing raylib's DrawCircle from our member function
+// of the same name.
+//-----------------------------------------------------------------------------
+
+#include "CRender.h"
+
+//-----------------------------------------------------------------------------
+CRender::CRender()
+    :
+        mScreenWidth( 800 ),
+        mScreenHeight( 600 )
+{
+    InitWindow( mScreenWidth, mScreenHeight, "MTRX3760 Lab 2 - A5 Noise Bonus" );
+    SetTargetFPS( 60 );
+}
+
+int CRender::GetScreenWidth() const
+{
+    return mScreenWidth;
+}
+
+int CRender::GetScreenHeight() const
+{
+    return mScreenHeight;
+}
+
+bool CRender::WindowShouldClose()
+{
+    bool Result = ::WindowShouldClose();
+    return Result;
+}
+
+void CRender::CloseWindow()
+{
+    ::CloseWindow();
+}
+
+void CRender::BeginDrawing()
+{
+    ::BeginDrawing();
+    ::ClearBackground( BLACK );
+}
+
+void CRender::EndDrawing()
+{
+    ::EndDrawing();
+}
+
+void CRender::DrawCircle( Vec2D aPosition, int aRadius, Color aColor )
+{
+    ::DrawCircle( aPosition.x, aPosition.y, aRadius, aColor );
+}
+
+void CRender::DrawLine( Vec2D aStart, Vec2D aEnd, float aThickness, Color aColor )
+{
+    Vector2 Start = { aStart.x, aStart.y };
+    Vector2 End = { aEnd.x, aEnd.y };
+
+    ::DrawLineEx( Start, End, aThickness, aColor );
+}
+
+Color CRender::Lighten( Color aColour, float aFraction )
+{
+    Color Result = aColour;
+
+    Result.r = MixTowardsWhite( aColour.r, aFraction );
+    Result.g = MixTowardsWhite( aColour.g, aFraction );
+    Result.b = MixTowardsWhite( aColour.b, aFraction );
+
+    return Result;
+}
+
+unsigned char CRender::MixTowardsWhite( unsigned char aChannel, float aFraction )
+{
+    const float White = 255.0f;
+    const float Rounding = 0.5f;
+
+    float Value = static_cast<float>( aChannel );
+    float Mixed = Value + ( White - Value ) * aFraction;
+
+    return static_cast<unsigned char>( Mixed + Rounding );
+}
+\end{lstlisting}
+
+\subsection*{A5: CRender.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRender.h
+//
+// A thin wrapper around the raylib graphics library. Everything raylib-specific
+// is hidden behind this class, so the rest of the program never includes
+// raylib.h and never sees a raylib type.
+//
+//
+// INSTALLING RAYLIB ON YOUR OWN MACHINE (you have sudo)
+//
+//     sudo add-apt-repository ppa:texus/raylib
+//     sudo apt update
+//     sudo apt install libraylib5-dev
+//
+// Find the raylib header and read it. It is a single file listing every
+// function raylib offers, one per line, each with a comment. Worth a look.
+//
+//     sudo updatedb
+//     locate raylib.h
+//
+// The updatedb is only necessary once, to update your search database.
+// Locate reports something like /usr/include/raylib.h, which you can open
+// with your favourite editor.
+//
+//
+// INSTALLING RAYLIB ON A LAB MACHINE (you do not have sudo)
+//
+// apt needs root, so build raylib from source and install it into your own
+// home directory instead. This takes about a minute.
+//
+// It does not matter where you unpack the source, because the finished library
+// is installed into $HOME/raylib either way. Start from your home directory,
+// and keep the source tree out of your project folder so you do not submit it.
+//
+//     cd $HOME
+//     git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib-src
+//     cd raylib-src
+//     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/raylib -DBUILD_EXAMPLES=OFF
+//     cmake --build build -j$( nproc )
+//     cmake --install build
+//
+// You only need to do that once. The raylib-src folder can be deleted
+// afterwards if you want the space back; $HOME/raylib is the part that matters.
+// Now change back into the folder holding your own source files to build.
+//
+// The header is then in your home directory, and you can read it with:
+//
+//     less $HOME/raylib/include/raylib.h
+//
+// raylib builds as a static library, so no further setup is needed to run it.
+//
+//
+// BUILDING
+//
+// The build command differs between the two cases above. See TestRender.cpp for
+// both versions.
+//-----------------------------------------------------------------------------
+
+#ifndef CRENDER_H
+#define CRENDER_H
+
+#include "raylib.h"
+
+//-----------------------------------------------------------------------------
+struct Vec2D
+{
+    float x;
+    float y;
+};
+
+//-----------------------------------------------------------------------------
+class CRender
+{
+    public:
+        //---Ctor/Dtor---
+        CRender();
+
+        //---Util---
+        bool WindowShouldClose();
+        void CloseWindow();
+
+        //---Drawing---
+        void BeginDrawing();
+        void EndDrawing();
+
+        void DrawCircle( Vec2D aPosition, int aRadius, Color aColor );
+        void DrawLine( Vec2D aStart, Vec2D aEnd, float aThickness, Color aColor );
+
+        //---Colour---
+        // Returns aColour mixed part of the way towards white. aFraction 0
+        // leaves the colour alone, 1 turns it fully white. This is how each
+        // robot in a group gets its own lighter shade of the family colour.
+        static Color Lighten( Color aColour, float aFraction );
+
+        //---Access to the window---
+        int GetScreenWidth() const;
+        int GetScreenHeight() const;
+
+    private:
+        //---Moves one colour channel (0 to 255) partway towards 255---
+        static unsigned char MixTowardsWhite( unsigned char aChannel, float aFraction );
+
+        //---The window---
+        const int mScreenWidth;
+        const int mScreenHeight;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRobot.cpp
+//
+// The shared robot mechanics: moving one step, dealing with wall collisions
+// (undo the move but keep the new heading, and only count the hit once),
+// checking whether the lap is finished, remembering the trail, and drawing it
+// all. Sensing and steering are the only parts left for a specific robot to
+// write.
+//-----------------------------------------------------------------------------
+
+#include "CRobot.h"
+#include "CRoom.h"
+
+#include <cmath>
+#include <cstddef>
+
+//---A little over two steps at normal speed: close enough that the trail
+//   still looks like a smooth curve, but far enough apart that a robot
+//   turning almost on the spot doesn't pile up points where it barely moved.
+const float CRobot::kTrailPointSpacing = 4.0f;
+
+//---A robot has to get properly clear of its start point before coming back
+//   counts as finishing a lap - otherwise it could be credited a lap within
+//   its first few steps. Both loops in this simulation are much wider than
+//   150 units, so a robot that really does a lap always clears this.-------
+const float CRobot::kLapLeaveDistance = 150.0f;
+const float CRobot::kLapReturnDistance = 30.0f;
+
+
+//-----------------------------------------------------------------------------
+// Sets the robot's fixed measurements, places it at its start pose, and
+// remembers that starting point both as the first point of its trail and as
+// the spot the lap test measures distance from.
+//-----------------------------------------------------------------------------
+CRobot::CRobot( const CPose& arStartPose, const CRoom& arRoom,
+                CNoiseSource& arNoise, Color aBodyColour )
+    :
+        mRadius( 15.0f ),
+        mAxleWidth( 26.0f ),
+        mBaseSpeed( 40.0f ),
+        mTimeStep( 0.05f ),
+        mPose( arStartPose ),
+        mDriveTrain( mAxleWidth, arNoise ),
+        mBodyColour( aBodyColour ),
+        mStartPosition( arStartPose.mPosition ),
+        mHasLeftStart( false ),
+        mLapDone( false ),
+        mUpdateCount( 0 ),
+        mCollisionCount( 0 ),
+        mWasColliding( false ),
+        mrRoom( arRoom )
+{
+    mTrail.push_back( mPose.mPosition );
+}
+
+
+//-----------------------------------------------------------------------------
+CRobot::~CRobot()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Runs the robot through one time step: check its sensors, decide on wheel
+// speeds, try to move, deal with a wall if it hits one, and check whether
+// that move just finished the lap.
+void CRobot::Update()
+{
+    // Once the lap is finished the robot just stops: its trail stays on
+    // screen, but it doesn't drive any further or draw over its own picture.
+    if( !mLapDone )
+    {
+        Sense();
+        SteerFromSensors();
+
+        CPose TentativePose = mDriveTrain.Advance( mPose, mTimeStep );
+
+        if( HasCollided( TentativePose ) )
+        {
+            // Undo the move, but keep the new heading, so steering still has
+            // a chance to turn the robot away from the wall next step.
+            mPose.mHeading = TentativePose.mHeading;
+
+            if( !mWasColliding )
+            {
+                ++mCollisionCount;
+            }
+            mWasColliding = true;
+        }
+        else
+        {
+            mPose = TentativePose;
+            mWasColliding = false;
+        }
+
+        CheckLap();
+        ExtendTrail();
+        ++mUpdateCount;
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::DrawTrail( CRender& arRender ) const
+{
+    const float TrailThickness = 1.5f;
+
+    // A line joining each stored point to the next, in the robot's own colour.
+    for( std::size_t i = 1; i < mTrail.size(); ++i )
+    {
+        arRender.DrawLine( mTrail[i - 1], mTrail[i], TrailThickness, mBodyColour );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::DrawBody( CRender& arRender ) const
+{
+    const float HeadingLineThickness = 2.0f;
+
+    arRender.DrawCircle( mPose.mPosition, static_cast<int>( mRadius ), mBodyColour );
+
+    // A short line from the centre out to the edge, pointing the way the
+    // robot is facing.
+    Vec2D HeadingEnd
+    {
+        mPose.mPosition.x + mRadius * std::cos( mPose.mHeading ),
+        mPose.mPosition.y + mRadius * std::sin( mPose.mHeading )
+    };
+    arRender.DrawLine( mPose.mPosition, HeadingEnd, HeadingLineThickness, BLACK );
+}
+
+
+//-----------------------------------------------------------------------------
+int CRobot::GetUpdateCount() const
+{
+    return mUpdateCount;
+}
+
+
+//-----------------------------------------------------------------------------
+int CRobot::GetCollisionCount() const
+{
+    return mCollisionCount;
+}
+
+
+//-----------------------------------------------------------------------------
+bool CRobot::HasFinishedLap() const
+{
+    return mLapDone;
+}
+
+
+//-----------------------------------------------------------------------------
+const CPose& CRobot::Pose() const
+{
+    return mPose;
+}
+
+
+//-----------------------------------------------------------------------------
+const CRoom& CRobot::Room() const
+{
+    return mrRoom;
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::SetWheelSpeeds( float aLeft, float aRight )
+{
+    mDriveTrain.SetWheelSpeeds( aLeft, aRight );
+}
+
+
+//-----------------------------------------------------------------------------
+float CRobot::BaseSpeed() const
+{
+    return mBaseSpeed;
+}
+
+
+//-----------------------------------------------------------------------------
+bool CRobot::HasCollided( const CPose& arTentativePose ) const
+{
+    return mrRoom.IsColliding( arTentativePose.mPosition, mRadius );
+}
+
+
+//-----------------------------------------------------------------------------
+// Works out how far the robot currently is from where it started. The first
+// check remembers, once and for all, that the robot has properly driven away
+// from home - that's mHasLeftStart, and it only ever gets set to true, never
+// back to false. The second check then looks for the robot coming back close
+// to home again, but only counts it once mHasLeftStart is already true. That
+// two-step check is what stops a robot being credited with a lap in its very
+// first few steps, before it has gone anywhere.
+void CRobot::CheckLap()
+{
+    float OffsetX = mPose.mPosition.x - mStartPosition.x;
+    float OffsetY = mPose.mPosition.y - mStartPosition.y;
+    float DistanceFromStart = std::sqrt( OffsetX * OffsetX + OffsetY * OffsetY );
+
+    if( DistanceFromStart > kLapLeaveDistance )
+    {
+        mHasLeftStart = true;
+    }
+
+    if( mHasLeftStart && ( DistanceFromStart < kLapReturnDistance ) )
+    {
+        mLapDone = true;
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CRobot::ExtendTrail()
+{
+    // Copied by value: push_back below can move the trail's storage around,
+    // which would leave a reference to the old storage pointing at nothing.
+    Vec2D LastPoint = mTrail.back();
+
+    float DeltaX = mPose.mPosition.x - LastPoint.x;
+    float DeltaY = mPose.mPosition.y - LastPoint.y;
+
+    // Compared as squared distances, so there's no need for a square root
+    // check on every single step.
+    if( DeltaX * DeltaX + DeltaY * DeltaY >= kTrailPointSpacing * kTrailPointSpacing )
+    {
+        mTrail.push_back( mPose.mPosition );
+    }
+}
+\end{lstlisting}
+
+\subsection*{A5: CRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CRobot.h
+//
+// A CRobot is the common part of every robot in the simulation. It keeps
+// track of where the robot is, drives its wheels, remembers its trail, and
+// counts how many steps it has taken and how many times it has hit a wall.
+//
+// It does not know how to sense the world or how to steer. Each specific kind
+// of robot - the wall follower, the line follower - fills in Sense() and
+// SteerFromSensors() to do that its own way. Everything else about running
+// the robot happens here, once, for both kinds.
+//
+// For this noise bonus, a robot is also given the shared CNoiseSource, so its
+// drive train can add a little slip to each wheel. That's the only thing that
+// changes: it still steers purely on what its own sensors tell it and just has
+// to cope with the slip. A robot also stops moving once it has driven a full
+// lap, so a finished robot doesn't keep drawing over its own picture, and wall
+// touches are still counted but no longer printed one by one, since the bonus
+// doesn't score them and forty robots hitting walls would flood the console.
+//-----------------------------------------------------------------------------
+
+#ifndef CROBOT_H
+#define CROBOT_H
+
+#include "CRender.h"       // CRender, Color, Vec2D
+#include "CLoopReader.h"   // CPose
+#include "CDriveTrain.h"
+
+#include <string>
+#include <vector>
+
+class CRoom;          // forward declaration: held by const reference, not owned
+class CNoiseSource;   // forward declaration: shared, held by reference, not owned
+
+//-----------------------------------------------------------------------------
+class CRobot
+{
+    public:
+        //---Ctor/Dtor---
+        // arStartPose: where the robot begins. This has already had the random
+        //   start scatter added by the caller, so the robot itself never has
+        //   to think about noise.
+        // arRoom:  the walls this robot checks for collisions (and, for the
+        //   wall follower, senses). Not owned, just a reference.
+        // arNoise: the shared noise source its wheels slip from. Not owned.
+        // aBodyColour: the colour the robot's body and trail are drawn in.
+        CRobot( const CPose& arStartPose, const CRoom& arRoom,
+                CNoiseSource& arNoise, Color aBodyColour );
+        virtual ~CRobot();
+
+        //---Simulation---
+        // Moves the robot forward by one fixed time step. Does nothing once
+        // the robot has finished its lap.
+        void Update();
+
+        //---Rendering---
+        // Split into two calls so a whole group of robots can have every
+        // trail drawn first and every body drawn after, and no robot's body
+        // ends up hidden under a trail drawn later.
+        void DrawTrail( CRender& arRender ) const;
+        void DrawBody( CRender& arRender ) const;
+
+        //---Reporting---
+        int GetUpdateCount() const;             // how many steps the robot has taken
+        int GetCollisionCount() const;          // how many times it has hit a wall
+        bool HasFinishedLap() const;            // whether it has made it all the way around
+        virtual std::string Name() const = 0;   // the robot's name, e.g. "Wall follower"
+
+    protected:
+        //---Every specific robot has to write these two functions itself---
+        virtual void Sense() = 0;              // checks the robot's own sensors
+        virtual void SteerFromSensors() = 0;   // works out the wheel speeds from what the sensors found
+
+        //---The only parts a specific robot is allowed to touch. Everything
+        //   else stays private, so only CRobot itself can change it.---
+        const CPose& Pose() const;             // where the robot currently is
+        const CRoom& Room() const;             // the room its sensors check against
+        void SetWheelSpeeds( float aLeft, float aRight );   // the only way to change the wheel speeds
+        float BaseSpeed() const;               // the wheel speed used when driving straight
+
+    private:
+        //---True if the robot would be touching a wall at arTentativePose---
+        bool HasCollided( const CPose& arTentativePose ) const;
+
+        //---Marks the lap as finished once the robot has driven well clear of
+        //   its start point and then made its way back close to it again---
+        void CheckLap();
+
+        //---Adds the robot's current position to its trail, but only once it
+        //   has moved a little way from the last point that was kept---
+        void ExtendTrail();
+
+        //---How far the robot has to move before another trail point is kept.
+        //   Keeping every single step would mean storing and redrawing forty
+        //   robots' worth of almost identical points, every single frame.---
+        static const float kTrailPointSpacing;
+
+        //---How the lap is judged, measured as distance from the start point---
+        static const float kLapLeaveDistance;    // the robot must get at least this far away first
+        static const float kLapReturnDistance;   // then come back to within this distance
+
+        //---Fixed measurements and settings, the same for the robot's whole life---
+        const float mRadius;      // the robot's radius, fixed at 15 by the spec
+        const float mAxleWidth;   // the distance between the two wheels
+        const float mBaseSpeed;   // the wheel speed used when driving straight
+        const float mTimeStep;    // how many simulated seconds pass in one Update()
+
+        //---What changes as the robot runs---
+        CPose mPose;
+        CDriveTrain mDriveTrain;
+        Color mBodyColour;
+
+        Vec2D mStartPosition;   // where the robot began, used to judge the lap
+        bool mHasLeftStart;     // true once the robot has driven far enough away
+        bool mLapDone;          // true once it has come back again after that
+
+        std::vector<Vec2D> mTrail;   // one point per step; the ctor adds the very first one
+
+        int mUpdateCount;
+        int mCollisionCount;
+        bool mWasColliding;   // so a collision is only counted once when it starts,
+                              // not on every step the robot stays against the wall
+
+        const CRoom& mrRoom;   // the room this robot checks against; not owned
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CSimulation.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CSimulation.cpp
+//
+// LoadMaps loads the room, then the line, and only builds the two groups of
+// robots once both have loaded successfully. Run steps both groups forward
+// every frame until every robot has finished (or the step limit is reached),
+// then stops stepping and just keeps redrawing the finished picture.
+//-----------------------------------------------------------------------------
+
+#include "CSimulation.h"
+#include "CRender.h"
+#include "CWallFollowerRobot.h"
+#include "CLineFollowerRobot.h"
+
+#include <iostream>
+
+//---Twenty of each robot type, as the brief asks for.-----------------------
+const int CSimulation::kRobotsPerType = 20;
+
+//---A lap of either loop takes well under a thousand steps, so this leaves
+//   plenty of room to spare. It only gets reached by a robot that has been
+//   thrown so far off course it never makes it back, and it stops that one
+//   robot from holding up the other thirty-nine forever.--------------------
+const int CSimulation::kMaxSteps = 2500;
+
+//---Any fixed number would do here; what matters is that it's fixed, so the
+//   report screenshot can be produced again later. A different seed just
+//   gives a different, equally fair, spread of paths.------------------------
+const unsigned int CSimulation::kNoiseSeed = 20260911u;
+
+//---The last robot in a group is lightened this far towards white; the first
+//   one isn't lightened at all. Kept below 1 so even the palest robot is
+//   still clearly its own family colour.-------------------------------------
+const float CSimulation::kMaxLighten = 0.7f;
+
+
+//-----------------------------------------------------------------------------
+// Builds the noise source using the fixed seed. The room, the line, and the
+// two robot groups all start out empty and are filled in once the maps load.
+//-----------------------------------------------------------------------------
+CSimulation::CSimulation()
+    :
+        mNoise( kNoiseSeed ),
+        mStepCount( 0 ),
+        mSummaryPrinted( false )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Loads the room, then the line, stopping early if either one fails. Only
+// once both are in place does it build the robots, since each one needs a
+// start pose that comes from its own map.
+bool CSimulation::LoadMaps( const std::string& arWallsMap, const std::string& arLineMap )
+{
+    bool Loaded = mRoom.LoadFromFile( arWallsMap );
+
+    if( Loaded )
+    {
+        Loaded = mLine.LoadFromFile( arLineMap );
+    }
+
+    if( Loaded )
+    {
+        BuildRobots();
+    }
+
+    return Loaded;
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::BuildRobots()
+{
+    mWallFollowers.clear();
+    mLineFollowers.clear();
+
+    for( int Index = 0; Index < kRobotsPerType; ++Index )
+    {
+        float Shade = ShadeForRobot( Index );
+
+        // Each robot gets the map's start pose with its own random scatter
+        // added, so the twenty robots don't all start stacked on one spot.
+        CPose WallStart = mNoise.ScatterStartPose( mRoom.GetStartPose() );
+        CPose LineStart = mNoise.ScatterStartPose( mLine.GetStartPose() );
+
+        mWallFollowers.push_back(
+            std::make_unique<CWallFollowerRobot>( WallStart, mRoom, mNoise, Shade ) );
+
+        mLineFollowers.push_back(
+            std::make_unique<CLineFollowerRobot>( LineStart, mRoom, mLine, mNoise, Shade ) );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+float CSimulation::ShadeForRobot( int aIndex ) const
+{
+    // Spreads the group evenly: 0 for the first robot, kMaxLighten for the
+    // last one, and everything in between spaced out evenly.
+    float Position = static_cast<float>( aIndex ) / static_cast<float>( kRobotsPerType - 1 );
+
+    return Position * kMaxLighten;
+}
+
+
+//-----------------------------------------------------------------------------
+// Keeps the window open and redrawing every frame. While the run isn't
+// finished yet, each frame also steps both groups of robots forward once.
+// Once it is finished, stepping stops but the last frame keeps being redrawn,
+// which is what holds the finished picture on screen, and the summary gets
+// printed the moment that first happens.
+void CSimulation::Run( CRender& arRender )
+{
+    mNoise.PrintNoiseLevels();
+
+    while( !arRender.WindowShouldClose() )
+    {
+        if( RunFinished() )
+        {
+            PrintSummaryOnce();
+        }
+        else
+        {
+            StepGroup( mWallFollowers );
+            StepGroup( mLineFollowers );
+            ++mStepCount;
+        }
+
+        arRender.BeginDrawing();
+        DrawFrame( arRender );
+        arRender.EndDrawing();
+    }
+
+    arRender.CloseWindow();
+
+    // Only prints here if the window was closed before the run finished
+    // itself - otherwise the summary has already been printed above.
+    PrintSummaryOnce();
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::StepGroup( CRobotGroup& arGroup )
+{
+    for( const std::unique_ptr<CRobot>& rRobot : arGroup )
+    {
+        rRobot->Update();
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::DrawFrame( CRender& arRender ) const
+{
+    mRoom.Draw( arRender );
+    mLine.Draw( arRender );
+
+    // Every trail is drawn first, then every body, across both groups, so no
+    // robot's body ends up hidden underneath a trail drawn afterwards.
+    DrawTrails( mWallFollowers, arRender );
+    DrawTrails( mLineFollowers, arRender );
+
+    DrawBodies( mWallFollowers, arRender );
+    DrawBodies( mLineFollowers, arRender );
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::DrawTrails( const CRobotGroup& arGroup, CRender& arRender ) const
+{
+    for( const std::unique_ptr<CRobot>& rRobot : arGroup )
+    {
+        rRobot->DrawTrail( arRender );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::DrawBodies( const CRobotGroup& arGroup, CRender& arRender ) const
+{
+    for( const std::unique_ptr<CRobot>& rRobot : arGroup )
+    {
+        rRobot->DrawBody( arRender );
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+bool CSimulation::RunFinished() const
+{
+    bool BothGroupsDone = GroupFinished( mWallFollowers ) && GroupFinished( mLineFollowers );
+
+    return BothGroupsDone || ( mStepCount >= kMaxSteps );
+}
+
+
+//-----------------------------------------------------------------------------
+bool CSimulation::GroupFinished( const CRobotGroup& arGroup ) const
+{
+    return CountFinished( arGroup ) == static_cast<int>( arGroup.size() );
+}
+
+
+//-----------------------------------------------------------------------------
+int CSimulation::CountFinished( const CRobotGroup& arGroup ) const
+{
+    int Finished = 0;
+
+    for( const std::unique_ptr<CRobot>& rRobot : arGroup )
+    {
+        if( rRobot->HasFinishedLap() )
+        {
+            ++Finished;
+        }
+    }
+
+    return Finished;
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::ReportGroup( const CRobotGroup& arGroup ) const
+{
+    if( !arGroup.empty() )
+    {
+        int Collisions = 0;
+
+        for( const std::unique_ptr<CRobot>& rRobot : arGroup )
+        {
+            Collisions += rRobot->GetCollisionCount();
+        }
+
+        std::cout << arGroup.front()->Name() << ": "
+                  << CountFinished( arGroup ) << " of " << arGroup.size()
+                  << " finished the loop, " << Collisions
+                  << " wall collisions in total (not counted for this bonus)"
+                  << std::endl;
+    }
+}
+
+
+//-----------------------------------------------------------------------------
+void CSimulation::PrintSummaryOnce()
+{
+    if( !mSummaryPrinted )
+    {
+        std::cout << "--- Run summary ---" << std::endl;
+        std::cout << "Steps taken: " << mStepCount
+                  << " of at most " << kMaxSteps << std::endl;
+
+        ReportGroup( mWallFollowers );
+        ReportGroup( mLineFollowers );
+
+        mSummaryPrinted = true;
+    }
+}
+\end{lstlisting}
+
+\subsection*{A5: CSimulation.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CSimulation.h
+//
+// A CSimulation owns the whole simulated world: the room, the floor line, the
+// noise source, and both groups of robots. It runs the fixed-timestep loop
+// that updates and draws them. main() just needs to build one of these, load
+// the maps, and call Run().
+//
+// This differs from the plain A2 simulation in three ways, all handled here:
+// there are twenty wall followers and twenty line followers instead of one of
+// each, held as two groups; every robot's start pose is the map's start pose
+// with a small random scatter added, so no two robots begin in exactly the
+// same spot; and the run stops itself once every robot has finished its lap
+// (or a step limit is hit), then holds that finished picture and prints the
+// summary, so the report screenshot and console output can be captured at the
+// same moment.
+//
+// The noise source is owned here and shared with every robot, so one seed
+// decides the whole run.
+//-----------------------------------------------------------------------------
+
+#ifndef CSIMULATION_H
+#define CSIMULATION_H
+
+#include "CRoom.h"
+#include "CFloorLine.h"
+#include "CNoiseSource.h"
+#include "CRobot.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+class CRender;   // forward declaration: Run() takes it by reference only
+
+//-----------------------------------------------------------------------------
+class CSimulation
+{
+    public:
+        //---Ctor---
+        CSimulation();
+
+        //---Setup---
+        // Loads both maps and, if they both load, builds both groups of
+        // robots. Returns false, and prints a message, if either map fails.
+        bool LoadMaps( const std::string& arWallsMap, const std::string& arLineMap );
+
+        //---Run---
+        // Updates and draws every robot until the run is finished, then keeps
+        // showing the finished picture until the window is closed.
+        void Run( CRender& arRender );
+
+    private:
+        //---A group of robots of the same type. The simulation keeps two.---
+        typedef std::vector<std::unique_ptr<CRobot>> CRobotGroup;
+
+        //---Setup---
+        void BuildRobots();                        // fills both groups of robots
+        float ShadeForRobot( int aIndex ) const;   // how much to lighten robot number aIndex, 0 to 1
+
+        //---One frame of the run---
+        void StepGroup( CRobotGroup& arGroup );                                 // moves every robot in the group forward one step
+        void DrawTrails( const CRobotGroup& arGroup, CRender& arRender ) const; // draws every trail in the group
+        void DrawBodies( const CRobotGroup& arGroup, CRender& arRender ) const; // draws every body in the group
+        void DrawFrame( CRender& arRender ) const;                              // draws the whole picture, one frame
+
+        //---Working out when the run is finished, and reporting the result---
+        bool RunFinished() const;                                // true once both groups are done, or time runs out
+        bool GroupFinished( const CRobotGroup& arGroup ) const;  // true once every robot in the group has finished
+        int CountFinished( const CRobotGroup& arGroup ) const;   // how many robots in the group have finished
+        void ReportGroup( const CRobotGroup& arGroup ) const;    // prints one summary line for the group
+        void PrintSummaryOnce();                                 // prints the whole summary, but only the first time
+
+        //---Fixed for every run---
+        static const int kRobotsPerType;      // twenty of each robot type, as the brief asks for
+        static const int kMaxSteps;           // gives up on a robot that never makes it back
+        static const unsigned int kNoiseSeed; // fixed, so a run can be repeated exactly
+        static const float kMaxLighten;       // how much lighter the last robot's colour can get
+
+        CRoom mRoom;
+        CFloorLine mLine;
+
+        CNoiseSource mNoise;   // shared with every robot; owned here
+
+        CRobotGroup mWallFollowers;
+        CRobotGroup mLineFollowers;
+
+        int mStepCount;
+        bool mSummaryPrinted;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: CWallFollowerRobot.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.cpp
+//
+// The wall-specific half of the robot. The steering law is unchanged from A1:
+// a two-mode proportional controller on the two wheel speeds around a base
+// speed.
+//
+//   - Corner mode: if the 45-degree forward-right sensor reads below
+//     mCornerThreshold, a wall is closing in ahead; steer left, harder the
+//     closer it is.
+//   - Wall-hold mode: otherwise hold the 90-degree side sensor at
+//     mTargetWallDistance; too far steers toward the wall, too close away.
+//
+// The steering error is clamped so a lost reading (max range) cannot demand a
+// violent turn.
+//
+// None of this steering changes for the noise bonus. The wheel slip is handled
+// over in CDriveTrain, and because both modes here steer by an amount
+// proportional to a measured error, the slip just shows up as a slightly
+// bigger error next step - and gets steered back out the same way any error
+// would.
+//-----------------------------------------------------------------------------
+
+#include "CWallFollowerRobot.h"
+#include "CRoom.h"
+
+#include <algorithm>
+#include <cmath>
+
+//---Fixed by the assignment spec: two sensors, aimed 90 and 45 degrees right---
+static const float kPi = 3.14159265358979323846f;
+static const float kSideSensorAngle    = kPi / 2.0f;   // 90 degrees
+static const float kForwardSensorAngle = kPi / 4.0f;   // 45 degrees
+
+//---Steering error is clamped to this magnitude before scaling by a gain---
+static const float kMaxSteeringError = 100.0f;
+
+//---The colour every wall follower is a lighter shade of---
+const Color CWallFollowerRobot::kFamilyColour = SKYBLUE;
+
+
+//-----------------------------------------------------------------------------
+CWallFollowerRobot::CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom,
+                                        CNoiseSource& arNoise, float aShadeFraction )
+    :
+        CRobot( arStartPose, arRoom, arNoise,
+                CRender::Lighten( kFamilyColour, aShadeFraction ) ),
+        mMaxSensorRange( 300.0f ),
+        mTargetWallDistance( 60.0f ),
+        mSteeringGain( 0.9f ),
+        mCornerThreshold( 70.0f ),
+        mCornerGain( 1.4f ),
+        mSideSensor( kSideSensorAngle, mMaxSensorRange ),
+        mForwardSensor( kForwardSensorAngle, mMaxSensorRange ),
+        mSideReading( mMaxSensorRange ),
+        mForwardReading( mMaxSensorRange )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+std::string CWallFollowerRobot::Name() const
+{
+    return "Wall follower";
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::Sense()
+{
+    mSideReading    = mSideSensor.Sense( Pose(), Room() );
+    mForwardReading = mForwardSensor.Sense( Pose(), Room() );
+}
+
+
+//-----------------------------------------------------------------------------
+void CWallFollowerRobot::SteerFromSensors()
+{
+    float LeftSpeed = BaseSpeed();
+    float RightSpeed = BaseSpeed();
+
+    if( mForwardReading < mCornerThreshold )
+    {
+        // A wall is closing in ahead-right: turn left to round the corner,
+        // overriding the side-distance control below. The closer the wall,
+        // the harder the turn.
+        float CornerError = mCornerThreshold - mForwardReading;
+        CornerError = std::min( CornerError, kMaxSteeringError );
+
+        LeftSpeed  -= mCornerGain * CornerError;
+        RightSpeed += mCornerGain * CornerError;
+    }
+    else
+    {
+        // Hold the side sensor at the target distance: too far away and we
+        // steer toward the wall, too close and we steer away from it.
+        float SideError = mSideReading - mTargetWallDistance;
+        SideError = std::max( -kMaxSteeringError, std::min( kMaxSteeringError, SideError ) );
+
+        LeftSpeed  += mSteeringGain * SideError;
+        RightSpeed -= mSteeringGain * SideError;
+    }
+
+    SetWheelSpeeds( LeftSpeed, RightSpeed );
+}
+\end{lstlisting}
+
+\subsection*{A5: CWallFollowerRobot.h}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// CWallFollowerRobot.h
+//
+// A CRobot that follows the wall on its right-hand side. It carries the two
+// range sensors the spec fixes (one aimed 90 degrees right, one 45 degrees
+// forward-right) and supplies the two CRobot hooks:
+//
+//   Sense()            - read both range sensors against the room
+//   SteerFromSensors() - a two-mode proportional controller (see the .cpp)
+//
+// All the machinery it used to have in A1 - pose, drive train, trail,
+// collision handling, counters, Update(), Draw() - now lives in CRobot.
+//
+// For this noise bonus, the constructor also takes the shared noise source
+// (passed straight on to the drive train) and a shade fraction from 0 to 1,
+// which lightens the body colour so the twenty wall followers can be told
+// apart on screen.
+//-----------------------------------------------------------------------------
+
+#ifndef CWALLFOLLOWERROBOT_H
+#define CWALLFOLLOWERROBOT_H
+
+#include "CRobot.h"
+#include "CRangeSensor.h"
+#include "CLoopReader.h"   // CPose
+
+#include <string>
+
+class CRoom;          // forward declaration: only used here by const reference
+class CNoiseSource;   // forward declaration: only used here by reference
+
+//-----------------------------------------------------------------------------
+class CWallFollowerRobot : public CRobot
+{
+    public:
+        //---Ctor---
+        CWallFollowerRobot( const CPose& arStartPose, const CRoom& arRoom,
+                            CNoiseSource& arNoise, float aShadeFraction );
+
+        //---Reporting---
+        std::string Name() const override;
+
+    protected:
+        //---CRobot hooks---
+        void Sense() override;
+        void SteerFromSensors() override;
+
+    private:
+        //---The colour every wall follower is a lighter shade of---
+        static const Color kFamilyColour;
+
+        //---Tuning, fixed for the life of the robot---
+        const float mMaxSensorRange;       // sensors report at most this far
+        const float mTargetWallDistance;   // desired distance from the side wall
+        const float mSteeringGain;         // proportional gain, side-distance control
+        const float mCornerThreshold;      // forward reading below this means "corner ahead"
+        const float mCornerGain;           // proportional gain, corner-avoidance control
+
+        //---Sensors: 90 degrees right, and 45 degrees forward-right---
+        CRangeSensor mSideSensor;
+        CRangeSensor mForwardSensor;
+
+        //---Most recent readings, refreshed by Sense()---
+        float mSideReading;
+        float mForwardReading;
+};
+
+#endif
+\end{lstlisting}
+
+\subsection*{A5: main.cpp}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, breaklines=true]
+//-----------------------------------------------------------------------------
+// main.cpp
+//
+// MTRX3760 Lab 2, A5: Noise Bonus.
+//
+// A copy of A2 - the wall follower and the line follower running side by side
+// - with some randomness added in, in the three places the brief asks for:
+//
+//   - a small random shift to each robot's starting position and heading,
+//   - a small random slip in how far each wheel actually turns each step, and
+//   - twenty of each kind of robot running at the same time.
+//
+// All of the randomness comes from one CNoiseSource, owned by CSimulation and
+// shared with every robot, so one seed decides the entire run. Neither robot's
+// steering rule is changed from A2 - each one still steers purely on what its
+// own sensors tell it, and that's exactly what lets a noisy robot find its way
+// around anyway.
+//
+// The run stops itself once every robot has finished its lap (or a step limit
+// is reached), prints its summary, and keeps showing the finished picture on
+// screen, so the screenshot and the console output can both be captured at
+// the same time. Close the window to quit.
+//
+//
+// BUILDING, IF YOU INSTALLED RAYLIB WITH APT (on your own machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp CRangeSensor.cpp CLineSensor.cpp CNoiseSource.cpp CDriveTrain.cpp CRobot.cpp CWallFollowerRobot.cpp CLineFollowerRobot.cpp CLoopReader.cpp CRender.cpp -lraylib -o NoiseBonus
+//
+//
+// BUILDING, IF YOU BUILT RAYLIB FROM SOURCE (on a lab machine)
+//
+//     g++ -Wall -Wextra -std=c++17 main.cpp CSimulation.cpp CLoopShape.cpp CRoom.cpp CFloorLine.cpp CRangeSensor.cpp CLineSensor.cpp CNoiseSource.cpp CDriveTrain.cpp CRobot.cpp CWallFollowerRobot.cpp CLineFollowerRobot.cpp CLoopReader.cpp CRender.cpp -I$HOME/raylib/include -L$HOME/raylib/lib -lraylib -o NoiseBonus
+//
+//
+// RUNNING
+//
+//     ./NoiseBonus
+//     ./NoiseBonus SimpleWalls.map SimpleLine.map
+//-----------------------------------------------------------------------------
+
+#include "CRender.h"
+#include "CSimulation.h"
+
+#include <iostream>
+#include <string>
+
+//-----------------------------------------------------------------------------
+// Reads the map filenames off the command line, falling back to the two
+// defaults if none were given, then builds and runs the simulation.
+int main( int argc, char* argv[] )
+{
+    int ExitCode = 0;
+
+    std::string WallsMapFilename = "SimpleWalls.map";
+    std::string LineMapFilename = "SimpleLine.map";
+
+    if( argc > 1 )
+    {
+        WallsMapFilename = argv[1];
+    }
+    if( argc > 2 )
+    {
+        LineMapFilename = argv[2];
+    }
+
+    CSimulation Simulation;
+
+    if( !Simulation.LoadMaps( WallsMapFilename, LineMapFilename ) )
+    {
+        std::cout << "Could not load maps ('" << WallsMapFilename
+                  << "', '" << LineMapFilename << "')" << std::endl;
+        ExitCode = 1;
+    }
+    else
+    {
+        CRender Render;
+        Simulation.Run( Render );
+    }
+
+    return ExitCode;
+}
+\end{lstlisting}
+

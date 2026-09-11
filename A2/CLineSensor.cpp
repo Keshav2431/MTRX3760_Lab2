@@ -1,8 +1,9 @@
 //-----------------------------------------------------------------------------
 // CLineSensor.cpp
 //
-// Rotates the sensor's robot-frame mount offset into world space by the
-// robot's heading, then asks the line whether that world point is painted.
+// Turns the sensor's mount position - which is measured relative to the robot
+// - into a point in the world, using the robot's current heading, then asks
+// the line whether that point is on the paint.
 //-----------------------------------------------------------------------------
 
 #include "CLineSensor.h"
@@ -25,8 +26,8 @@ bool CLineSensor::Sense( const CPose& arRobotPose, const CFloorLine& arLine ) co
     float CosHeading = std::cos( arRobotPose.mHeading );
     float SinHeading = std::sin( arRobotPose.mHeading );
 
-    // Forward is (cos, sin) along the heading; the robot's right is that
-    // turned 90 degrees clockwise, i.e. (-sin, cos).
+    // Straight ahead is (cos, sin) of the heading. The robot's right is that
+    // direction turned 90 degrees clockwise, which is (-sin, cos).
     Vec2D SamplePoint
     {
         arRobotPose.mPosition.x + mForwardOffset * CosHeading - mLateralOffset * SinHeading,

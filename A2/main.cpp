@@ -3,10 +3,10 @@
 //
 // MTRX3760 Lab 2, A2: Wall Follower + Line Follower.
 //
-// Builds a CSimulation, loads the two loop files (SimpleWalls.map and
-// SimpleLine.map by default), and runs the fixed simulated time step loop
-// until the window closes. Both robots run at once and do not interact.
-// Close the window to end the run and print the per-robot summary.
+// Builds a CSimulation, loads the two map files (SimpleWalls.map and
+// SimpleLine.map by default), and runs the fixed-timestep loop until the
+// window is closed. Both robots run side by side and never interact.
+// Close the window to end the run and print the summary for each robot.
 //
 //
 // BUILDING, IF YOU INSTALLED RAYLIB WITH APT (on your own machine)
@@ -32,8 +32,12 @@
 #include <string>
 
 //-----------------------------------------------------------------------------
+// Reads the map filenames off the command line, falling back to the two
+// defaults if none were given, then builds and runs the simulation.
 int main( int argc, char* argv[] )
 {
+    int ExitCode = 0;
+
     std::string WallsMapFilename = "SimpleWalls.map";
     std::string LineMapFilename = "SimpleLine.map";
 
@@ -52,11 +56,13 @@ int main( int argc, char* argv[] )
     {
         std::cout << "Could not load maps ('" << WallsMapFilename
                   << "', '" << LineMapFilename << "')" << std::endl;
-        return 1;
+        ExitCode = 1;
+    }
+    else
+    {
+        CRender Render;
+        Simulation.Run( Render );
     }
 
-    CRender Render;
-    Simulation.Run( Render );
-
-    return 0;
+    return ExitCode;
 }

@@ -1,10 +1,11 @@
 //-----------------------------------------------------------------------------
 // CRobot.cpp
 //
-// The shared robot mechanics, lifted almost verbatim from A1's
-// CWallFollowerRobot: the Update() sequence, the collision handling (reject
-// the move but keep the heading change; count once on entry), the trail, and
-// the drawing. Only the sensing and steering are left to the subclass.
+// This is the same robot behaviour A1's CWallFollowerRobot used to have on its
+// own: moving one step, dealing with wall collisions (undo the move but keep
+// the new heading, and only count the hit once), remembering the trail, and
+// drawing it all. Sensing and steering are the only parts left for a specific
+// robot to write.
 //-----------------------------------------------------------------------------
 
 #include "CRobot.h"
@@ -14,6 +15,9 @@
 #include <cstddef>
 #include <iostream>
 
+//-----------------------------------------------------------------------------
+// Sets the robot's fixed measurements, places it at its start pose, and adds
+// that starting point as the first point of its trail.
 //-----------------------------------------------------------------------------
 CRobot::CRobot( const CPose& arStartPose, const CRoom& arRoom, Color aBodyColour )
     :
@@ -34,6 +38,14 @@ CRobot::CRobot( const CPose& arStartPose, const CRoom& arRoom, Color aBodyColour
 
 
 //-----------------------------------------------------------------------------
+CRobot::~CRobot()
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Runs the robot through one time step: check its sensors, decide on wheel
+// speeds, try to move, and deal with a wall if it hits one.
 void CRobot::Update()
 {
     Sense();
@@ -43,15 +55,15 @@ void CRobot::Update()
 
     if( HasCollided( TentativePose ) )
     {
-        // Reject the position change but keep the new heading, so steering
-        // can still turn the robot clear of the wall on a later update.
+        // Undo the move, but keep the new heading, so steering still has a
+        // chance to turn the robot away from the wall on the next step.
         mPose.mHeading = TentativePose.mHeading;
 
         if( !mWasColliding )
         {
             ++mCollisionCount;
             std::cout << Name() << " collision #" << mCollisionCount
-                       << " at update " << mUpdateCount << std::endl;
+                      << " at update " << mUpdateCount << std::endl;
         }
         mWasColliding = true;
     }
@@ -72,16 +84,18 @@ void CRobot::Draw( CRender& arRender ) const
     const float TrailThickness = 1.5f;
     const float HeadingLineThickness = 2.0f;
 
-    // Trail, drawn as a chain of segments between consecutive stored points.
+    // The trail: a line joining each stored point to the next, in the
+    // robot's own colour so the two robots' trails can be told apart.
     for( std::size_t i = 1; i < mTrail.size(); ++i )
     {
-        arRender.DrawLine( mTrail[i - 1], mTrail[i], TrailThickness, GRAY );
+        arRender.DrawLine( mTrail[i - 1], mTrail[i], TrailThickness, mBodyColour );
     }
 
-    // Body.
+    // The body.
     arRender.DrawCircle( mPose.mPosition, static_cast<int>( mRadius ), mBodyColour );
 
-    // Heading indicator: a line from the centre to the edge, facing forward.
+    // A short line from the centre out to the edge, pointing the way the
+    // robot is facing.
     Vec2D HeadingEnd
     {
         mPose.mPosition.x + mRadius * std::cos( mPose.mHeading ),
